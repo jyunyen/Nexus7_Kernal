@@ -50,12 +50,14 @@ static struct regulator *grouper_vdd_cam3;
 
 static unsigned int pmic_id;
 
+/* replace by AP3426
 static const struct i2c_board_info cardhu_i2c1_board_info_al3010[] = {
 	{
 		I2C_BOARD_INFO("al3010",0x1C),
 		.irq = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
 	},
 };
+*/
 
 static const struct i2c_board_info cap1106_i2c1_board_info[] = {
     {
@@ -269,6 +271,71 @@ static struct i2c_board_info front_sensor_i2c2_board_info[] = {  //ddebug
 		.platform_data = &yuv_front_sensor_data,
 	},
 };
+
+
+/* Dyna-image AP3xx6 */
+#if 0
+static const struct i2c_board_info cardhu_i2c2_board_info_ap3xx6[] = {
+	{
+		I2C_BOARD_INFO("ap3xx6",0x1E),
+		.irq = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+	},
+};
+#endif
+
+//#ifdef CONFIG_SENSORS_AP321XX
+
+//#define AP321XX_INT_PIN         RK2928_PIN0_PC6
+#if 0
+static int AP321XX_init_hw(void)
+{
+	int ret = 0;
+#ifdef RK2928	
+	ret = gpio_request(AP321XX_INT_PIN, NULL);
+	if (ret != 0)
+	{
+		gpio_free(AP321XX_INT_PIN);
+		printk(KERN_ERR "request AP321XX_INT_PIN fail!\n");
+		return -1;
+	}
+	else
+	{
+		gpio_direction_input(AP321XX_INT_PIN);
+	}
+#endif	
+	return 0;
+}
+
+static void AP321XX_exit_hw(void)
+{
+#ifdef RK2928	
+	gpio_free(AP321XX_INT_PIN);
+#endif	
+	return;
+}
+
+static struct ap321xx_platform_data ap321xx_info = {
+	.init_platform_hw = AP321XX_init_hw,
+	.exit_platform_hw = AP321XX_exit_hw,
+};
+
+#endif
+
+
+static const struct i2c_board_info cardhu_i2c2_board_info_ap321xx[] = {
+
+        {
+        				I2C_BOARD_INFO("ap321xx",0x1E),
+                .type                   = "ap321xx",
+                .addr                   = 0x1E,
+                .flags                  = 0,
+                .irq                     = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+  //              .platform_data = &ap321xx_info
+        },
+};
+//#endif
+
+
 /* MPU board file definition	*/
 #if (MPU_GYRO_TYPE == MPU_TYPE_MPU3050)
 #define MPU_GYRO_NAME		"mpu3050"
@@ -446,6 +513,7 @@ static int grouper_nct1008_init(void)
 	return ret;
 }
 
+
 int __init grouper_sensors_init(void)
 {
 	int err;
@@ -469,8 +537,18 @@ int __init grouper_sensors_init(void)
 
 	mpuirq_init();
 
+/*
 	i2c_register_board_info(2, cardhu_i2c1_board_info_al3010,
 		ARRAY_SIZE(cardhu_i2c1_board_info_al3010));
+*/
+
+
+//#ifdef CONFIG_SENSORS_AP321XX
+	i2c_register_board_info(2, cardhu_i2c2_board_info_ap321xx,
+		ARRAY_SIZE(cardhu_i2c2_board_info_ap321xx));
+//#endif
+
+
 
     if (GROUPER_PROJECT_BACH == grouper_get_project_id()) {
         i2c_register_board_info(2, cap1106_i2c1_board_info,
