@@ -283,57 +283,48 @@ static const struct i2c_board_info cardhu_i2c2_board_info_ap3xx6[] = {
 };
 #endif
 
-//#ifdef CONFIG_SENSORS_AP321XX
+#ifdef CONFIG_SENSORS_AP321XX
 
-//#define AP321XX_INT_PIN         RK2928_PIN0_PC6
-#if 0
-static int AP321XX_init_hw(void)
-{
-	int ret = 0;
-#ifdef RK2928	
-	ret = gpio_request(AP321XX_INT_PIN, NULL);
-	if (ret != 0)
-	{
-		gpio_free(AP321XX_INT_PIN);
-		printk(KERN_ERR "request AP321XX_INT_PIN fail!\n");
-		return -1;
-	}
-	else
-	{
-		gpio_direction_input(AP321XX_INT_PIN);
-	}
-#endif	
-	return 0;
-}
-
-static void AP321XX_exit_hw(void)
-{
-#ifdef RK2928	
-	gpio_free(AP321XX_INT_PIN);
-#endif	
-	return;
-}
-
-static struct ap321xx_platform_data ap321xx_info = {
-	.init_platform_hw = AP321XX_init_hw,
-	.exit_platform_hw = AP321XX_exit_hw,
-};
-
-#endif
+#define AP321XX_INT_PIN         TEGRA_GPIO_PZ2
+#define AP321XX_NAME		"AP321xx"
 
 
 static const struct i2c_board_info cardhu_i2c2_board_info_ap321xx[] = {
 
-        {
-        				I2C_BOARD_INFO("ap321xx",0x1E),
-                .type                   = "ap321xx",
-                .addr                   = 0x1E,
-                .flags                  = 0,
-                .irq                     = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
-  //              .platform_data = &ap321xx_info
-        },
+    {
+	I2C_BOARD_INFO("ap321xx",0x1E),
+	.type                   = "ap321xx",
+	.addr                   = 0x1E,
+	.flags                  = 0,
+	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+    },
 };
-//#endif
+static int ap321xx_init(void)
+{
+    int ret = 0;
+    tegra_gpio_enable(AP321XX_INT_PIN);
+    ret = gpio_request(AP321XX_INT_PIN, AP321XX_NAME);
+    if (ret != 0)
+    {
+	gpio_free(AP321XX_INT_PIN);
+	printk(KERN_ERR "request AP321XX_INT_PIN fail!\n");
+	return -1;
+    }
+    ret = gpio_direction_input(AP321XX_INT_PIN);
+
+
+    if (ret < 0) {
+	pr_err("%s: gpio_direction_input failed %d\n", __func__, ret);
+	gpio_free(AP321XX_INT_PIN);
+	return -1;
+    }
+
+    i2c_register_board_info(2, cardhu_i2c2_board_info_ap321xx,
+	    ARRAY_SIZE(cardhu_i2c2_board_info_ap321xx));
+    return 0;
+}
+
+#endif
 
 
 /* MPU board file definition	*/
@@ -536,17 +527,14 @@ int __init grouper_sensors_init(void)
 		ARRAY_SIZE(grouper_i2c4_nct1008_board_info));
 
 	mpuirq_init();
+	ap321xx_init();
+
 
 /*
 	i2c_register_board_info(2, cardhu_i2c1_board_info_al3010,
 		ARRAY_SIZE(cardhu_i2c1_board_info_al3010));
 */
 
-
-//#ifdef CONFIG_SENSORS_AP321XX
-	i2c_register_board_info(2, cardhu_i2c2_board_info_ap321xx,
-		ARRAY_SIZE(cardhu_i2c2_board_info_ap321xx));
-//#endif
 
 
 

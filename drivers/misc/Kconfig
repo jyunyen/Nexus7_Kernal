@@ -400,7 +400,7 @@ config SENSORS_AK8975
 	  If you say yes here you get support for Asahi Kasei's
 	  orientation sensor AK8975.
 
-config SENSORS_AP3xx6
+config SENSORS_AP3XX6
 	tristate "AP3xx6 ALS-PS support"
 	default n
 	depends on I2C
@@ -408,7 +408,7 @@ config SENSORS_AP3xx6
 	  If you say yes here you get support for Dyna-Image's
 	  ALS+PS sensor AP3426.
 	 
-config SENSORS_AP321xx
+config SENSORS_AP321XX
 	tristate "AP321xx ALS-PS support"
 	default n
 	depends on I2C

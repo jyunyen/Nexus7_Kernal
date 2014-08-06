@@ -402,7 +402,7 @@ static int ap321xx_get_adc_value(struct i2c_client *client)
 	for(index = 0; index < 7 && val > ap321xx_threshole[index];index++)
 		;
 
-	return index;
+	return val;
 }
 
 static int ap321xx_get_object(struct i2c_client *client)
@@ -864,7 +864,7 @@ static ssize_t ap321xx_store_mode(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(mode, S_IWUSR | S_IRUGO,
+static DEVICE_ATTR(mode, 0777,
 		   ap321xx_show_mode, ap321xx_store_mode);
 
 
