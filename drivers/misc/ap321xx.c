@@ -148,6 +148,7 @@ struct ap321xx_data {
     int irq;
     struct input_dev	*psensor_input_dev;
     struct input_dev	*lsensor_input_dev;
+    struct input_dev	*hsensor_input_dev;
     struct workqueue_struct *lightsensor_wq;
     struct work_struct lightsensor_work;
     struct timer_list pl_timer;
@@ -249,6 +250,16 @@ static int ap321xx_set_range(struct i2c_client *client, int range)
 }
 
 
+static int ap321xx_get_ir_data(struct i2c_client *client)
+{
+    int ret;
+
+    ret = __ap321xx_read_reg(client, AP3212B_MODE_COMMAND,
+	    AP3212B_MODE_MASK, AP3212B_MODE_SHIFT);
+    return ret;
+}
+static DEVICE_ATTR(ir_data, S_IWUSR | S_IRUGO,
+	NULL, ap321xx_get_ir_data);
 /* mode */
 static int ap321xx_get_mode(struct i2c_client *client)
 {
@@ -632,12 +643,49 @@ done:
     return rc;
 }
 
+
 static void ap321xx_unregister_lsensor_device(struct i2c_client *client, struct ap321xx_data *data)
 {
     misc_deregister(&ap321xx_lsensor_misc);
     input_unregister_device(data->lsensor_input_dev);
 }
 
+static int ap321xx_register_heartbeat_sensor_device(struct i2c_client *client, struct ap321xx_data *data)
+{
+    struct input_dev *input_dev;
+    int rc;
+
+    LDBG("allocating input device heartbeat sensor\n");
+    input_dev = input_allocate_device();
+    if (!input_dev) {
+	dev_err(&client->dev,"%s: could not allocate input device for heartbeat sensor\n", __FUNCTION__);
+	rc = -ENOMEM;
+	goto done;
+    }
+    data->hsensor_input_dev = input_dev;
+    input_set_drvdata(input_dev, data);
+    input_dev->name = "heartbeat";
+    input_dev->dev.parent = &client->dev;
+    set_bit(ABS_WHEEL, input_dev->evbit);
+    input_set_abs_params(input_dev, ABS_WHEEL, 0, 8, 0, 0);
+
+    rc = input_register_device(input_dev);
+    if (rc < 0) {
+	pr_err("%s: could not register input device for heartbeat sensor\n", __FUNCTION__);
+	goto done;
+    }
+    return 0;
+
+err_unregister_input_device:
+    input_unregister_device(input_dev);
+done:
+    return rc;
+}
+
+static void ap321xx_unregister_heartbeat_device(struct i2c_client *client, struct ap321xx_data *data)
+{
+    input_unregister_device(data->hsensor_input_dev);
+}
 static void ap321xx_change_ls_threshold(struct i2c_client *client)
 {
     struct ap321xx_data *data = i2c_get_clientdata(client);
@@ -1173,6 +1221,7 @@ static struct attribute *ap321xx_attributes[] = {
 #ifdef LSC_DBG
     &dev_attr_em.attr,
 #endif
+    &dev_attr_ir_data.attr,
     NULL
 };
 
@@ -1351,6 +1400,11 @@ static int __devinit ap321xx_probe(struct i2c_client *client,
 	goto exit_free_ls_device;
     }
 
+   err = ap321xx_register_heartbeat_sensor_device(client, data);
+    if (err) {
+	dev_err(&client->dev, "failed to register_heartbeatsensor_device\n");
+	goto exit_free_heartbeats_device;
+    }
 #if 1
     /* register sysfs hooks */
     err = sysfs_create_group(&data->client->dev.kobj, &ap321xx_attr_group);
@@ -1397,6 +1451,8 @@ err_create_wq_failed:
 exit_free_ps_device:
     ap321xx_unregister_psensor_device(client,data);
 
+exit_free_heartbeats_device:
+    ap321xx_unregister_heartbeat_device(client,data);
 exit_free_ls_device:
     ap321xx_unregister_lsensor_device(client,data);
 
@@ -1415,6 +1471,7 @@ static int __devexit ap321xx_remove(struct i2c_client *client)
     //	sysfs_remove_group(&data->input->dev.kobj, &ap321xx_attr_group);
     ap321xx_unregister_psensor_device(client,data);
     ap321xx_unregister_lsensor_device(client,data);
+    ap321xx_unregister_heartbeat_device(client,data);
 #ifdef CONFIG_HAS_EARLYSUSPEND
     unregister_early_suspend(&ap321xx_early_suspend);
 #endif
