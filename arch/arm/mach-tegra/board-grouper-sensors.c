@@ -283,7 +283,7 @@ static const struct i2c_board_info cardhu_i2c2_board_info_ap3xx6[] = {
 };
 #endif
 
-#ifdef CONFIG_SENSORS_AP321XX
+#if defined(CONFIG_SENSORS_AP321XX) 
 
 #define AP321XX_INT_PIN         TEGRA_GPIO_PZ2
 #define AP321XX_NAME		"AP321xx"
@@ -326,7 +326,48 @@ static int ap321xx_init(void)
 
 #endif
 
+#if defined(CONFIG_SENSORS_AP3426)
 
+#define AP3426_INT_PIN         TEGRA_GPIO_PZ2
+#define AP3426_NAME		"AP3426"
+
+
+static const struct i2c_board_info cardhu_i2c2_board_info_ap3426[] = {
+
+    {
+	I2C_BOARD_INFO("ap3426",0x1E),
+	.type                   = "ap3426",
+	.addr                   = 0x1E,
+	.flags                  = 0,
+	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+    },
+};
+static int ap321xx_init(void)
+{
+    int ret = 0;
+    tegra_gpio_enable(AP3426_INT_PIN);
+    ret = gpio_request(AP3426_INT_PIN, AP3426_NAME);
+    if (ret != 0)
+    {
+	gpio_free(AP3426_INT_PIN);
+	printk(KERN_ERR "request AP321XX_INT_PIN fail!\n");
+	return -1;
+    }
+    ret = gpio_direction_input(AP3426_INT_PIN);
+
+
+    if (ret < 0) {
+	pr_err("%s: gpio_direction_input failed %d\n", __func__, ret);
+	gpio_free(AP3426_INT_PIN);
+	return -1;
+    }
+
+    i2c_register_board_info(2, cardhu_i2c2_board_info_ap3426,
+	    ARRAY_SIZE(cardhu_i2c2_board_info_ap3426));
+    return 0;
+}
+
+#endif
 /* MPU board file definition	*/
 #if (MPU_GYRO_TYPE == MPU_TYPE_MPU3050)
 #define MPU_GYRO_NAME		"mpu3050"
