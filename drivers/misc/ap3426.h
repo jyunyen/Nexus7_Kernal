@@ -49,7 +49,7 @@
 #define AP3426_ERR_IDENTIFICATION			-6
 
 
-#define AP3426_NUM_CACHABLE_REGS	30
+#define AP3426_NUM_CACHABLE_REGS	28
 
 /* ap3426 control registers */
 /*============================================================================*/
@@ -210,16 +210,6 @@
 
 
 
-/*----------------------------------------------------------------------------*/
-//PS Engineering Registers
-#define AP3426_REG_PS_DC_1         0x30 /*Only in Engineering chip, couldn't find in datasheet*/
-#define AP3426_REG_PS_DC_1_SHIFT         (0) 
-#define AP3426_REG_PS_DC_1_MASK         0x0f 
-#define AP3426_REG_PS_DC_2         0x32 /*Only in Engineering chip, couldn't find in datasheet*/
-#define AP3426_REG_PS_DC_2_SHIFT         (0) 
-#define AP3426_REG_PS_DC_2_MASK         0x01 
-
-/*----------------------------------------------------------------------------*/
 
 
 

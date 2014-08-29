@@ -90,7 +90,7 @@ static struct ap3426_data *private_pl_data = NULL;
 static u8 ap3426_reg[AP3426_NUM_CACHABLE_REGS] = 
 {0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
     0x10,0x1A,0x1B,0x1C,0x1D,
-    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D, 0x30, 0x31};
+    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D};
 
 // AP3426 range
 static int ap3426_range[4] = {32768,8192,2048,512};
@@ -175,31 +175,6 @@ static int ap3426_set_range(struct i2c_client *client, int range)
 }
 
 
-static int ap3426_set_ir_data(struct i2c_client *client, int en)
-{
-    int ret = 0;
-
-    if(en == 2) {
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_CONF,
-		AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_1,
-		AP3426_REG_PS_DC_1_MASK, AP3426_REG_PS_DC_1_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_2,
-		AP3426_REG_PS_DC_2_MASK, AP3426_REG_PS_DC_2_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_LEDD,
-		AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 1);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_MEAN,
-		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 3);
-	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, en);
-    }else if(en == 0){
-	LDBG("%s",__func__);
-	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
-    }
-
-    return ret;
-}
 /* mode */
 static int ap3426_get_mode(struct i2c_client *client)
 {
@@ -660,29 +635,6 @@ static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
 
 
 
-static ssize_t ap3426_store_ir_data(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
-    unsigned long val;
-    int ret;
-
-    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 7))
-	return -EINVAL;
-
-    ret = ap3426_set_ir_data(data->client, val);
-
-    if (ret < 0)
-	return ret;
-    ret = mod_timer(&data->pl_timer, jiffies + msecs_to_jiffies(PL_TIMER_DELAY));
-
-    if(ret) 
-	LDBG("Timer Error\n");
-    return count;
-}
-static DEVICE_ATTR(ir_data, S_IALLUGO,
-	NULL, ap3426_store_ir_data);
 /* mode */
 static ssize_t ap3426_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -715,7 +667,7 @@ static ssize_t ap3426_store_mode(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(mode, S_IALLUGO,
+static DEVICE_ATTR(mode, S_IRUGO | S_IWUGO,
 	ap3426_show_mode, ap3426_store_mode);
 
 
@@ -1002,7 +954,6 @@ static struct attribute *ap3426_attributes[] = {
 #ifdef LSC_DBG
     &dev_attr_em.attr,
 #endif
-    &dev_attr_ir_data.attr,
     NULL
 };
 
