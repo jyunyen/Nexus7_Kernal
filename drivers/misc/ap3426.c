@@ -737,7 +737,7 @@ static ssize_t ap3426_store_mode(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(mode, S_IALLUGO,
+static DEVICE_ATTR(mode, S_IRUGO | S_IWUGO,
 	ap3426_show_mode, ap3426_store_mode);
 
 
@@ -1024,7 +1024,6 @@ static struct attribute *ap3426_attributes[] = {
 #ifdef LSC_DBG
     &dev_attr_em.attr,
 #endif
-    &dev_attr_ir_data.attr,
     NULL
 };
 
@@ -1266,7 +1265,7 @@ static int __devexit ap3426_remove(struct i2c_client *client)
 #if POLLING_MODE
     if(&data->pl_timer)
 	del_timer(&data->pl_timer);
-#endifn
+#endif
     return 0;
 }
 
