@@ -342,7 +342,7 @@ static const struct i2c_board_info cardhu_i2c2_board_info_ap3426[] = {
 	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
     },
 };
-static int ap321xx_init(void)
+static int ap3426_init(void)
 {
     int ret = 0;
     tegra_gpio_enable(AP3426_INT_PIN);
@@ -350,7 +350,7 @@ static int ap321xx_init(void)
     if (ret != 0)
     {
 	gpio_free(AP3426_INT_PIN);
-	printk(KERN_ERR "request AP321XX_INT_PIN fail!\n");
+	printk(KERN_ERR "request AP3426_INT_PIN fail!\n");
 	return -1;
     }
     ret = gpio_direction_input(AP3426_INT_PIN);
@@ -568,7 +568,13 @@ int __init grouper_sensors_init(void)
 		ARRAY_SIZE(grouper_i2c4_nct1008_board_info));
 
 	mpuirq_init();
+#if defined(CONFIG_SENSORS_AP321XX) 
 	ap321xx_init();
+#endif
+       	
+#if defined(CONFIG_SENSORS_AP3426) 
+	ap3426_init();
+#endif
 
 
 /*

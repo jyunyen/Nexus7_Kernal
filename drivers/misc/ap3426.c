@@ -61,7 +61,8 @@
 #define DRIVER_VERSION		"1"
 
 
-#define PL_TIMER_DELAY 8
+#define PL_TIMER_DELAY 2000
+#define POLLING_MODE 0
 
 #define LSC_DBG
 #ifdef LSC_DBG
@@ -70,7 +71,11 @@
 #define LDBG(s,args...) {}
 #endif
 static void plsensor_work_handler(struct work_struct *w);
+#if POLLING_MODE
 static void pl_timer_callback(unsigned long pl_data);
+#endif
+static int ap3426_set_phthres(struct i2c_client *client, int val);
+static int ap3426_set_plthres(struct i2c_client *client, int val);
 
 struct ap3426_data {
     struct i2c_client *client;
@@ -82,7 +87,9 @@ struct ap3426_data {
     struct input_dev	*hsensor_input_dev;
     struct workqueue_struct *plsensor_wq;
     struct work_struct plsensor_work;
+#if POLLING_MODE
     struct timer_list pl_timer;
+#endif
 };
 
 static struct ap3426_data *private_pl_data = NULL;
@@ -90,7 +97,7 @@ static struct ap3426_data *private_pl_data = NULL;
 static u8 ap3426_reg[AP3426_NUM_CACHABLE_REGS] = 
 {0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
     0x10,0x1A,0x1B,0x1C,0x1D,
-    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D, 0x30, 0x31};
+    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D, 0x30, 0x32};
 
 // AP3426 range
 static int ap3426_range[4] = {32768,8192,2048,512};
@@ -180,6 +187,9 @@ static int ap3426_set_ir_data(struct i2c_client *client, int en)
     int ret = 0;
 
     if(en == 2) {
+	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	mdelay(200);
 	ret = __ap3426_write_reg(client, AP3426_REG_PS_CONF,
 		AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
 	ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_1,
@@ -189,13 +199,18 @@ static int ap3426_set_ir_data(struct i2c_client *client, int en)
 	ret = __ap3426_write_reg(client, AP3426_REG_PS_LEDD,
 		AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 1);
 	ret = __ap3426_write_reg(client, AP3426_REG_PS_MEAN,
-		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 3);
+		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
+	ret = __ap3426_write_reg(client, AP3426_REG_PS_PERSIS,
+		AP3426_REG_PS_PERSIS_MASK, AP3426_REG_PS_PERSIS_SHIFT, 0);
+	ret = ap3426_set_plthres(client, 0);
+	ret = ap3426_set_phthres(client, 535);
 	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
 		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, en);
     }else if(en == 0){
 	LDBG("%s",__func__);
 	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
 		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	mdelay(200);
     }
 
     return ret;
@@ -214,10 +229,14 @@ static int ap3426_set_mode(struct i2c_client *client, int mode)
 {
     int ret;
     if(mode == AP3426_SYS_PS_ENABLE) {
+	ret = ap3426_set_plthres(client, 100);
+	ret = ap3426_set_phthres(client, 500);
 	misc_ps_opened = 1;
     } else if(mode == AP3426_SYS_ALS_ENABLE) {
 	misc_ls_opened = 1;
     } else if(mode == AP3426_SYS_ALS_PS_ENABLE) {
+	ret = ap3426_set_plthres(client, 100);
+	ret = ap3426_set_phthres(client, 500);
 	misc_ps_opened = 1;
 	misc_ls_opened = 1;
     } else if(mode == AP3426_SYS_DEV_DOWN) {
@@ -371,7 +390,7 @@ static int ap3426_get_adc_value(struct i2c_client *client)
     range = ap3426_get_range(client);
     tmp = (((msb << 8) | lsb) * range) >> 16;
     tmp = tmp * cali / 100;
-    LDBG("ALS val=%d lux\n",tmp);
+    //LDBG("ALS val=%d lux\n",tmp);
 #endif
     val = msb << 8 | lsb;
 
@@ -384,7 +403,6 @@ static int ap3426_get_object(struct i2c_client *client)
     int val;
 
     val = i2c_smbus_read_byte_data(client, AP3426_OBJ_COMMAND);
-    LDBG("val=%x\n", val);
     val &= AP3426_OBJ_MASK;
 
     return val >> AP3426_OBJ_SHIFT;
@@ -411,13 +429,13 @@ static int ap3426_get_px_value(struct i2c_client *client)
 	return lsb;
     }
 
-    LDBG("%s, IR = %d\n", __func__, (u32)(lsb));
+    //LDBG("%s, IR = %d\n", __func__, (u32)(lsb));
     msb = i2c_smbus_read_byte_data(client, AP3426_REG_PS_DATA_HIGH);
 
     if (msb < 0)
 	return msb;
 
-    LDBG("%s, IR = %d\n", __func__, (u32)(msb));
+    //LDBG("%s, IR = %d\n", __func__, (u32)(msb));
 
     return (u32)(((msb & AL3426_REG_PS_DATA_HIGH_MASK) << 8) | (lsb & AL3426_REG_PS_DATA_LOW_MASK));
 }
@@ -675,10 +693,12 @@ static ssize_t ap3426_store_ir_data(struct device *dev,
 
     if (ret < 0)
 	return ret;
-    ret = mod_timer(&data->pl_timer, jiffies + msecs_to_jiffies(PL_TIMER_DELAY));
+#if POLLING_MODE
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(ret) 
 	LDBG("Timer Error\n");
+#endif
     return count;
 }
 static DEVICE_ATTR(ir_data, S_IALLUGO,
@@ -707,11 +727,13 @@ static ssize_t ap3426_store_mode(struct device *dev,
 
     if (ret < 0)
 	return ret;
+#if POLLING_MODE
     LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
-    ret = mod_timer(&data->pl_timer, jiffies + msecs_to_jiffies(PL_TIMER_DELAY));
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(ret) 
 	LDBG("Timer Error\n");
+#endif
     return count;
 }
 
@@ -1035,7 +1057,8 @@ static int ap3426_init_client(struct i2c_client *client)
     return 0;
 }
 
-void pl_timer_callback(unsigned long pl_data)
+#if POLLING_MODE
+static void pl_timer_callback(unsigned long pl_data)
 {
     struct ap3426_data *data;
     int ret =0;
@@ -1043,12 +1066,13 @@ void pl_timer_callback(unsigned long pl_data)
     data = private_pl_data;
     queue_work(data->plsensor_wq, &data->plsensor_work);
 
-    ret = mod_timer(&private_pl_data->pl_timer, jiffies + msecs_to_jiffies(PL_TIMER_DELAY));
+    ret = mod_timer(&private_pl_data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(ret) 
 	LDBG("Timer Error\n");
 
 }
+#endif
 static void plsensor_work_handler(struct work_struct *w)
 {
 
@@ -1056,35 +1080,42 @@ static void plsensor_work_handler(struct work_struct *w)
 	container_of(w, struct ap3426_data, plsensor_work);
     u8 int_stat;
     int pxvalue;
-    int distance;
+    int Pval;
+    int ret;
+
     int_stat = ap3426_get_intstat(data->client);
 
-    ap3426_change_ls_threshold(data->client);
-    distance = ap3426_get_object(data->client);
-    input_report_abs(data->psensor_input_dev, ABS_DISTANCE, distance);
-    input_sync(data->psensor_input_dev);
 
-    pxvalue = ap3426_get_px_value(data->client); 
-    input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
-    input_sync(data->hsensor_input_dev);
-#if 0
     // ALS int
     if (int_stat & AP3426_REG_SYS_INT_AMASK)
     {
+	LDBG("LS INT Status: %0x\n", int_stat);
 	ap3426_change_ls_threshold(data->client);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
+		AP3426_REG_SYS_INT_AMASK, AP3426_REG_SYS_INT_LS_SHIFT, 0);
     }
 
     // PX int
     if (int_stat & AP3426_REG_SYS_INT_PMASK)
     {
+	int_stat = ap3426_get_intstat(data->client);
+	LDBG("PS INT Status: %0x\n", int_stat);
 	Pval = ap3426_get_object(data->client);
 	LDBG("%s\n", Pval ? "obj near":"obj far");
 	input_report_abs(data->psensor_input_dev, ABS_DISTANCE, Pval);
+
 	input_sync(data->psensor_input_dev);
+	pxvalue = ap3426_get_px_value(data->client); 
+	LDBG("pxvalue = %d\n", pxvalue);
+	input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
+	input_sync(data->hsensor_input_dev);
+
+	mdelay(5);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
+		AP3426_REG_SYS_INT_PMASK, AP3426_REG_SYS_INT_PS_SHIFT, 0);
     }
 
-    enable_irq(data->client->irq);
-#endif
+      enable_irq(data->client->irq);
 }
 /*
  * I2C layer
@@ -1094,6 +1125,7 @@ static irqreturn_t ap3426_irq(int irq, void *data_)
 {
     struct ap3426_data *data = data_;
 
+    LDBG("interrupt\n");
     disable_irq_nosync(data->client->irq);
     queue_work(data->plsensor_wq, &data->plsensor_work);
 
@@ -1181,16 +1213,21 @@ static int __devinit ap3426_probe(struct i2c_client *client,
     }
 
     INIT_WORK(&data->plsensor_work, plsensor_work_handler);
+
+#if POLLING_MODE
     LDBG("Timer module installing\n");
     setup_timer(&data->pl_timer, pl_timer_callback, 0);
+#endif
 
 
     private_pl_data = data;
     dev_info(&client->dev, "Driver version %s enabled\n", DRIVER_VERSION);
     return 0;
 err_create_wq_failed:
+#if POLLING_MODE
     if(&data->pl_timer != NULL)
 	del_timer(&data->pl_timer);
+#endif
     if (data->plsensor_wq)
 	destroy_workqueue(data->plsensor_wq);
 exit_free_ps_device:
@@ -1226,8 +1263,10 @@ static int __devexit ap3426_remove(struct i2c_client *client)
 
     if (data->plsensor_wq)
 	destroy_workqueue(data->plsensor_wq);
+#if POLLING_MODE
     if(&data->pl_timer)
 	del_timer(&data->pl_timer);
+#endifn
     return 0;
 }
 
