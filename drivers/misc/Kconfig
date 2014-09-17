@@ -423,6 +423,13 @@ config SENSORS_AP3426
 	help
 	  If you say yes here you get support for Dyna-Image's
 	  ALS+PS sensor AP3426.
+config SENSORS_CX5036
+	tristate "CX5036 ALS-PS support"
+	default n
+	depends on I2C
+	help
+	  If you say yes here you get support for Dyna-Image's
+	  ALS+PS sensor CX5036.
 config SENSORS_NCT1008
 	tristate "ON Semiconductor Temperature Sensor"
 	default n

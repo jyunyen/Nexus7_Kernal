@@ -55,6 +55,7 @@ obj-$(CONFIG_SENSORS_AK8975)	+= akm8975.o
 obj-$(CONFIG_SENSORS_AP3xx6)	+= ap3xx6c.o
 obj-$(CONFIG_SENSORS_AP321XX)	+= ap321xx.o
 obj-$(CONFIG_SENSORS_AP3426)	+= ap3426.o
+obj-$(CONFIG_SENSORS_CX5036)	+= cx5036.o
 obj-$(CONFIG_SENSORS_NCT1008)	+= nct1008.o
 obj-$(CONFIG_BCM4329_RFKILL)	+= bcm4329_rfkill.o
 obj-$(CONFIG_BCM4330_RFKILL)	+= bcm4330_rfkill.o
