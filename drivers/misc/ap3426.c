@@ -521,8 +521,9 @@ static int ap3426_register_heartbeat_sensor_device(struct i2c_client *client, st
     input_set_drvdata(input_dev, data);
     input_dev->name = "heartbeat";
     input_dev->dev.parent = &client->dev;
-    set_bit(EV_ABS, input_dev->evbit);
-    input_set_abs_params(input_dev, ABS_WHEEL, 0, 8, 0, 0);
+    set_bit(EV_REL, input_dev->evbit);
+    input_set_capability(input_dev, EV_REL, ABS_WHEEL);
+
 
     rc = input_register_device(input_dev);
     if (rc < 0) {
@@ -1099,15 +1100,13 @@ static void plsensor_work_handler(struct work_struct *w)
     if (int_stat & AP3426_REG_SYS_INT_PMASK)
     {
 	int_stat = ap3426_get_intstat(data->client);
-	LDBG("PS INT Status: %0x\n", int_stat);
 	Pval = ap3426_get_object(data->client);
-	LDBG("%s\n", Pval ? "obj near":"obj far");
 	input_report_abs(data->psensor_input_dev, ABS_DISTANCE, Pval);
 
 	input_sync(data->psensor_input_dev);
 	pxvalue = ap3426_get_px_value(data->client); 
+	input_report_rel(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
 	LDBG("pxvalue = %d\n", pxvalue);
-	input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
 	input_sync(data->hsensor_input_dev);
 
 	mdelay(5);
