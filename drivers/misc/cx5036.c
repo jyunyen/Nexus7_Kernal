@@ -61,16 +61,17 @@
 
 #define LSC_DBG
 #ifdef LSC_DBG
-#define LDBG(s,args...)	{printk("LDBG: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
+#define LDBG(s,args...)	{printk("CX5036: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
 #else
 #define LDBG(s,args...) {}
 #endif
-static void plsensor_work_handler(struct work_struct *w);
+static void cx5036_work_handler(struct work_struct *w);
 #if POLLING_MODE
-static void pl_timer_callback(unsigned long pl_data);
+static void cx5036_timer_callback(unsigned long pl_data);
 #endif
 static int cx5036_set_phthres(struct i2c_client *client, int val);
 static int cx5036_set_plthres(struct i2c_client *client, int val);
+static void cx5036_change_ls_threshold(struct i2c_client *client);
 
 struct cx5036_data {
     struct i2c_client *client;
@@ -90,9 +91,9 @@ struct cx5036_data {
 static struct cx5036_data *private_pl_data = NULL;
 // CX5036 register
 static u8 cx5036_reg[CX5036_NUM_CACHABLE_REGS] = 
-{0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-    0x10,0x1A,0x1B,0x1C,0x1D,
-    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D, 0x30, 0x32};
+{
+0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x0a, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f
+};
 
 // CX5036 range
 static int cx5036_range[4] = {32768,8192,2048,512};
@@ -165,58 +166,25 @@ static int __cx5036_write_reg(struct i2c_client *client,
 /* range */
 static int cx5036_get_range(struct i2c_client *client)
 {
-    u8 idx = __cx5036_read_reg(client, CX5036_REG_ALS_CONF,
-	    CX5036_ALS_RANGE_MASK, CX5036_ALS_RANGE_SHIFT); 
+    u8 idx = __cx5036_read_reg(client, CX5036_REG_ALS_CON,
+	    CX5036_REG_ALS_ALGAIN_CON_MASK, CX5036_REG_ALS_ALGAIN_CON_SHIFT); 
     return range[idx];
 }
 
 static int cx5036_set_range(struct i2c_client *client, int range)
 {
-    return __cx5036_write_reg(client, CX5036_REG_ALS_CONF,
-	    CX5036_ALS_RANGE_MASK, CX5036_ALS_RANGE_SHIFT, range);
+    return __cx5036_write_reg(client, CX5036_REG_ALS_CON,
+	    CX5036_REG_ALS_ALGAIN_CON_MASK, CX5036_REG_ALS_ALGAIN_CON_SHIFT, range);
 }
 
 
-static int cx5036_set_ir_data(struct i2c_client *client, int en)
-{
-    int ret = 0;
-
-    if(en == 2) {
-	ret = __cx5036_write_reg(client, CX5036_REG_SYS_CONF,
-		CX5036_REG_SYS_CONF_MASK, CX5036_REG_SYS_CONF_SHIFT, CX5036_SYS_DEV_RESET);
-	mdelay(200);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_CONF,
-		CX5036_REG_PS_CONF_MASK, CX5036_REG_PS_CONF_SHIFT, 0);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_DC_1,
-		CX5036_REG_PS_DC_1_MASK, CX5036_REG_PS_DC_1_SHIFT, 0);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_DC_2,
-		CX5036_REG_PS_DC_2_MASK, CX5036_REG_PS_DC_2_SHIFT, 0);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_LEDD,
-		CX5036_REG_PS_LEDD_MASK, CX5036_REG_PS_LEDD_SHIFT, 1);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_MEAN,
-		CX5036_REG_PS_MEAN_MASK, CX5036_REG_PS_MEAN_SHIFT, 0);
-	ret = __cx5036_write_reg(client, CX5036_REG_PS_PERSIS,
-		CX5036_REG_PS_PERSIS_MASK, CX5036_REG_PS_PERSIS_SHIFT, 0);
-	ret = cx5036_set_plthres(client, 0);
-	ret = cx5036_set_phthres(client, 535);
-	ret = __cx5036_write_reg(client, CX5036_REG_SYS_CONF,
-		CX5036_REG_SYS_CONF_MASK, CX5036_REG_SYS_CONF_SHIFT, en);
-    }else if(en == 0){
-	LDBG("%s",__func__);
-	ret = __cx5036_write_reg(client, CX5036_REG_SYS_CONF,
-		CX5036_REG_SYS_CONF_MASK, CX5036_REG_SYS_CONF_SHIFT, CX5036_SYS_DEV_RESET);
-	mdelay(200);
-    }
-
-    return ret;
-}
 /* mode */
 static int cx5036_get_mode(struct i2c_client *client)
 {
     int ret;
 
-    ret = __cx5036_read_reg(client, CX5036_REG_SYS_CONF,
-	    CX5036_REG_SYS_CONF_MASK, CX5036_REG_SYS_CONF_SHIFT);
+    ret = __cx5036_read_reg(client, CX5036_REG_SYS_CON,
+	    CX5036_REG_SYS_CON_MASK, CX5036_REG_SYS_CON_SHIFT);
     return ret;
 }
 
@@ -224,12 +192,14 @@ static int cx5036_set_mode(struct i2c_client *client, int mode)
 {
     int ret;
     if(mode == CX5036_SYS_PS_ENABLE) {
+        ret = __cx5036_write_reg(client, CX5036_REG_PS_GAIN,
+	    CX5036_REG_PS_GAIN_MASK, CX5036_REG_PS_GAIN_SHIFT, 1);
 	ret = cx5036_set_plthres(client, 100);
 	ret = cx5036_set_phthres(client, 500);
 	misc_ps_opened = 1;
     } else if(mode == CX5036_SYS_ALS_ENABLE) {
 	misc_ls_opened = 1;
-    } else if(mode == CX5036_SYS_ALS_PS_ENABLE) {
+    } else if(mode == (CX5036_SYS_PS_ENABLE & CX5036_SYS_ALS_ENABLE)) {
 	ret = cx5036_set_plthres(client, 100);
 	ret = cx5036_set_phthres(client, 500);
 	misc_ps_opened = 1;
@@ -241,8 +211,8 @@ static int cx5036_set_mode(struct i2c_client *client, int mode)
 
 
 
-    ret = __cx5036_write_reg(client, CX5036_REG_SYS_CONF,
-	    CX5036_REG_SYS_CONF_MASK, CX5036_REG_SYS_CONF_SHIFT, mode);
+    ret = __cx5036_write_reg(client, CX5036_REG_SYS_CON,
+	    CX5036_REG_SYS_CON_MASK, CX5036_REG_SYS_CON_SHIFT, mode);
     return ret;
 }
 
@@ -250,10 +220,10 @@ static int cx5036_set_mode(struct i2c_client *client, int mode)
 static int cx5036_get_althres(struct i2c_client *client)
 {
     int lsb, msb;
-    lsb = __cx5036_read_reg(client, CX5036_REG_ALS_THDL_L,
-	    CX5036_REG_ALS_THDL_L_MASK, CX5036_REG_ALS_THDL_L_SHIFT);
-    msb = __cx5036_read_reg(client, CX5036_REG_ALS_THDL_H,
-	    CX5036_REG_ALS_THDL_H_MASK, CX5036_REG_ALS_THDL_H_SHIFT);
+    lsb = __cx5036_read_reg(client, CX5036_REG_AL_ALTHL_LOW,
+	    CX5036_REG_AL_ALTHL_LOW_MASK, CX5036_REG_AL_ALTHL_LOW_SHIFT);
+    msb = __cx5036_read_reg(client, CX5036_REG_AL_ALTHL_HIGH,
+	    CX5036_REG_AL_ALTHL_HIGH_MASK, CX5036_REG_AL_ALTHL_HIGH_SHIFT);
     return ((msb << 8) | lsb);
 }
 
@@ -263,15 +233,15 @@ static int cx5036_set_althres(struct i2c_client *client, int val)
     int lsb, msb, err;
 
     msb = val >> 8;
-    lsb = val & CX5036_REG_ALS_THDL_L_MASK;
+    lsb = val & CX5036_REG_AL_ALTHL_LOW_MASK;
 
-    err = __cx5036_write_reg(client, CX5036_REG_ALS_THDL_L,
-	    CX5036_REG_ALS_THDL_L_MASK, CX5036_REG_ALS_THDL_L_SHIFT, lsb);
+    err = __cx5036_write_reg(client, CX5036_REG_AL_ALTHL_LOW,
+	    CX5036_REG_AL_ALTHL_LOW_MASK, CX5036_REG_AL_ALTHL_LOW_SHIFT, lsb);
     if (err)
 	return err;
 
-    err = __cx5036_write_reg(client, CX5036_REG_ALS_THDL_H,
-	    CX5036_REG_ALS_THDL_H_MASK, CX5036_REG_ALS_THDL_H_SHIFT, msb);
+    err = __cx5036_write_reg(client, CX5036_REG_AL_ALTHL_HIGH,
+	    CX5036_REG_AL_ALTHL_HIGH_MASK, CX5036_REG_AL_ALTHL_HIGH_SHIFT, msb);
 
     return err;
 }
@@ -280,10 +250,10 @@ static int cx5036_set_althres(struct i2c_client *client, int val)
 static int cx5036_get_ahthres(struct i2c_client *client)
 {
     int lsb, msb;
-    lsb = __cx5036_read_reg(client, CX5036_REG_ALS_THDH_L,
-	    CX5036_REG_ALS_THDH_L_MASK, CX5036_REG_ALS_THDH_L_SHIFT);
-    msb = __cx5036_read_reg(client, CX5036_REG_ALS_THDH_H,
-	    CX5036_REG_ALS_THDH_H_MASK, CX5036_REG_ALS_THDH_H_SHIFT);
+    lsb = __cx5036_read_reg(client, CX5036_REG_AL_ALTHH_LOW,
+	    CX5036_REG_AL_ALTHH_LOW_MASK, CX5036_REG_AL_ALTHH_LOW_SHIFT);
+    msb = __cx5036_read_reg(client, CX5036_REG_AL_ALTHH_HIGH,
+	    CX5036_REG_AL_ALTHH_HIGH_MASK, CX5036_REG_AL_ALTHH_HIGH_SHIFT);
     return ((msb << 8) | lsb);
 }
 
@@ -292,27 +262,27 @@ static int cx5036_set_ahthres(struct i2c_client *client, int val)
     int lsb, msb, err;
 
     msb = val >> 8;
-    lsb = val & CX5036_REG_ALS_THDH_L_MASK;
+    lsb = val & CX5036_REG_AL_ALTHH_LOW_MASK;
 
-    err = __cx5036_write_reg(client, CX5036_REG_ALS_THDH_L,
-	    CX5036_REG_ALS_THDH_L_MASK, CX5036_REG_ALS_THDH_L_SHIFT, lsb);
+    err = __cx5036_write_reg(client, CX5036_REG_AL_ALTHH_LOW,
+	    CX5036_REG_AL_ALTHH_LOW_MASK, CX5036_REG_AL_ALTHH_LOW_SHIFT, lsb);
     if (err)
 	return err;
 
-    err = __cx5036_write_reg(client, CX5036_REG_ALS_THDH_H,
-	    CX5036_REG_ALS_THDH_H_MASK, CX5036_REG_ALS_THDH_H_SHIFT, msb);
+    err = __cx5036_write_reg(client, CX5036_REG_AL_ALTHH_HIGH,
+	    CX5036_REG_AL_ALTHH_HIGH_MASK, CX5036_REG_AL_ALTHH_HIGH_SHIFT, msb);
 
     return err;
 }
 
-/* PX low threshold */
+/* PS low threshold */
 static int cx5036_get_plthres(struct i2c_client *client)
 {
     int lsb, msb;
-    lsb = __cx5036_read_reg(client, CX5036_REG_PS_THDL_L,
-	    CX5036_REG_PS_THDL_L_MASK, CX5036_REG_PS_THDL_L_SHIFT);
-    msb = __cx5036_read_reg(client, CX5036_REG_PS_THDL_H,
-	    CX5036_REG_PS_THDL_H_MASK, CX5036_REG_PS_THDL_H_SHIFT);
+    lsb = __cx5036_read_reg(client, CX5036_REG_PS_PSTHL_LOW,
+	    CX5036_REG_PS_PSTHL_LOW_MASK, CX5036_REG_PS_PSTHL_LOW_SHIFT);
+    msb = __cx5036_read_reg(client, CX5036_REG_PS_PSTHL_HIGH,
+	    CX5036_REG_PS_PSTHL_HIGH_MASK, CX5036_REG_PS_PSTHL_HIGH_SHIFT);
     return ((msb << 8) | lsb);
 }
 
@@ -321,15 +291,15 @@ static int cx5036_set_plthres(struct i2c_client *client, int val)
     int lsb, msb, err;
 
     msb = val >> 8;
-    lsb = val & CX5036_REG_PS_THDL_L_MASK;
+    lsb = val & CX5036_REG_PS_PSTHL_LOW_MASK;
 
-    err = __cx5036_write_reg(client, CX5036_REG_PS_THDL_L,
-	    CX5036_REG_PS_THDL_L_MASK, CX5036_REG_PS_THDL_L_SHIFT, lsb);
+    err = __cx5036_write_reg(client, CX5036_REG_PS_PSTHL_LOW,
+	    CX5036_REG_PS_PSTHL_LOW_MASK, CX5036_REG_PS_PSTHL_LOW_SHIFT, lsb);
     if (err)
 	return err;
 
-    err = __cx5036_write_reg(client, CX5036_REG_PS_THDL_H,
-	    CX5036_REG_PS_THDL_H_MASK, CX5036_REG_PS_THDL_H_SHIFT, msb);
+    err = __cx5036_write_reg(client, CX5036_REG_PS_PSTHL_HIGH,
+	    CX5036_REG_PS_PSTHL_HIGH_MASK, CX5036_REG_PS_PSTHL_HIGH_SHIFT, msb);
 
     return err;
 }
@@ -338,10 +308,10 @@ static int cx5036_set_plthres(struct i2c_client *client, int val)
 static int cx5036_get_phthres(struct i2c_client *client)
 {
     int lsb, msb;
-    lsb = __cx5036_read_reg(client, CX5036_REG_PS_THDH_L,
-	    CX5036_REG_PS_THDH_L_MASK, CX5036_REG_PS_THDH_L_SHIFT);
-    msb = __cx5036_read_reg(client, CX5036_REG_PS_THDH_H,
-	    CX5036_REG_PS_THDH_H_MASK, CX5036_REG_PS_THDH_H_SHIFT);
+    lsb = __cx5036_read_reg(client, CX5036_REG_PS_PSTHH_LOW,
+	    CX5036_REG_PS_PSTHL_LOW_MASK, CX5036_REG_PS_PSTHL_LOW_SHIFT);
+    msb = __cx5036_read_reg(client, CX5036_REG_PS_PSTHH_HIGH,
+	    CX5036_REG_PS_PSTHL_HIGH_MASK, CX5036_REG_PS_PSTHL_HIGH_SHIFT);
     return ((msb << 8) | lsb);
 }
 
@@ -350,33 +320,44 @@ static int cx5036_set_phthres(struct i2c_client *client, int val)
     int lsb, msb, err;
 
     msb = val >> 8;
-    lsb = val & CX5036_REG_PS_THDH_L_MASK;
+    lsb = val & CX5036_REG_PS_PSTHH_LOW_MASK;
 
-    err = __cx5036_write_reg(client, CX5036_REG_PS_THDH_L,
-	    CX5036_REG_PS_THDH_L_MASK, CX5036_REG_PS_THDH_L_SHIFT, lsb);
+    err = __cx5036_write_reg(client, CX5036_REG_PS_PSTHH_LOW,
+	    CX5036_REG_PS_PSTHH_LOW_MASK, CX5036_REG_PS_PSTHH_LOW_SHIFT, lsb);
     if (err)
 	return err;
 
-    err = __cx5036_write_reg(client, CX5036_REG_PS_THDH_H,
-	    CX5036_REG_PS_THDH_H_MASK, CX5036_REG_PS_THDH_H_SHIFT, msb);
+    err = __cx5036_write_reg(client, CX5036_REG_PS_PSTHH_HIGH,
+	    CX5036_REG_PS_PSTHH_HIGH_MASK, CX5036_REG_PS_PSTHH_HIGH_SHIFT, msb);
 
     return err;
 }
 
-static int cx5036_get_adc_value(struct i2c_client *client)
+static int cx5036_get_als_value(struct i2c_client *client)
 {
     unsigned int lsb, msb, val;
 #ifdef LSC_DBG
     unsigned int tmp,range;
 #endif
+    int err;
 
-    lsb = i2c_smbus_read_byte_data(client, CX5036_REG_ALS_DATA_LOW);
+
+    err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFR,
+	    CX5036_REG_LUM_COEFR_MASK, CX5036_REG_LUM_COEFR_SHIFT, 1);
+    err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFG,
+	    CX5036_REG_LUM_COEFG_MASK, CX5036_REG_LUM_COEFG_SHIFT, 1);
+    err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFB,
+	    CX5036_REG_LUM_COEFB_MASK, CX5036_REG_LUM_COEFB_SHIFT, 1);
+    if(err < 0) {
+	return 
+    }
+    lsb = i2c_smbus_read_byte_data(client, CX5036_REG_L_DATA_LOW);
 
     if (lsb < 0) {
 	return lsb;
     }
 
-    msb = i2c_smbus_read_byte_data(client, CX5036_REG_ALS_DATA_HIGH);
+    msb = i2c_smbus_read_byte_data(client, CX5036_REG_L_DATA_HIGH);
 
     if (msb < 0)
 	return msb;
@@ -397,10 +378,11 @@ static int cx5036_get_object(struct i2c_client *client)
 {
     int val;
 
-    val = i2c_smbus_read_byte_data(client, CX5036_OBJ_COMMAND);
-    val &= CX5036_OBJ_MASK;
+    val = i2c_smbus_read_byte_data(client, CX5036_REG_SYS_INTSTATUS);
+    LDBG("Object = %x\n", val);
+    val &= CX5036_REG_SYS_INT_OBJ_MASK;
 
-    return val >> CX5036_OBJ_SHIFT;
+    return val >> CX5036_REG_SYS_INT_OBJ_SHIFT;
 }
 
 static int cx5036_get_intstat(struct i2c_client *client)
@@ -408,9 +390,8 @@ static int cx5036_get_intstat(struct i2c_client *client)
     int val;
 
     val = i2c_smbus_read_byte_data(client, CX5036_REG_SYS_INTSTATUS);
-    val &= CX5036_REG_SYS_INT_MASK;
 
-    return val >> CX5036_REG_SYS_INT_SHIFT;
+    return val;
 }
 
 
@@ -424,18 +405,14 @@ static int cx5036_get_px_value(struct i2c_client *client)
 	return lsb;
     }
 
-    //LDBG("%s, IR = %d\n", __func__, (u32)(lsb));
     msb = i2c_smbus_read_byte_data(client, CX5036_REG_PS_DATA_HIGH);
 
     if (msb < 0)
 	return msb;
 
-    //LDBG("%s, IR = %d\n", __func__, (u32)(msb));
-
-    return (u32)(((msb & AL3426_REG_PS_DATA_HIGH_MASK) << 8) | (lsb & AL3426_REG_PS_DATA_LOW_MASK));
+    return (u32)(((msb & CX5036_REG_PS_DATA_HIGH_MASK) << 8) | (lsb & CX5036_REG_PS_DATA_LOW_MASK));
 }
 
-static void cx5036_change_ls_threshold(struct i2c_client *client);
 
 
 
@@ -459,8 +436,8 @@ static int cx5036_lsensor_disable(struct i2c_client *client)
     mode = cx5036_get_mode(client);
     if(mode & CX5036_SYS_ALS_ENABLE){
 	mode &= ~CX5036_SYS_ALS_ENABLE;
-	if(mode == CX5036_SYS_DEV_RESET)
-	    mode = 0;
+	if(mode == CX5036_SYS_RST_ENABLE)
+	    mode = CX5036_SYS_DEV_DOWN;
 	ret = cx5036_set_mode(client,mode);
     }
 
@@ -537,7 +514,7 @@ static void cx5036_change_ls_threshold(struct i2c_client *client)
     struct cx5036_data *data = i2c_get_clientdata(client);
     int value;
 
-    value = cx5036_get_adc_value(client);
+    value = cx5036_get_als_value(client);
     if(value > 0){
 	cx5036_set_althres(client,cx5036_threshole[value-1]);
 	cx5036_set_ahthres(client,cx5036_threshole[value]);
@@ -574,7 +551,7 @@ static int cx5036_psensor_disable(struct i2c_client *client)
     mode = cx5036_get_mode(client);
     if(mode & CX5036_SYS_PS_ENABLE){
 	mode &= ~CX5036_SYS_PS_ENABLE;
-	if(mode == CX5036_SYS_DEV_RESET)
+	if(mode == CX5036_SYS_RST_ENABLE)
 	    mode = CX5036_SYS_DEV_DOWN;
 	ret = cx5036_set_mode(client,mode);
     }
@@ -673,31 +650,6 @@ static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
 
 
 
-static ssize_t cx5036_store_ir_data(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
-    unsigned long val;
-    int ret;
-
-    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 7))
-	return -EINVAL;
-
-    ret = cx5036_set_ir_data(data->client, val);
-
-    if (ret < 0)
-	return ret;
-#if POLLING_MODE
-    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
-
-    if(ret) 
-	LDBG("Timer Error\n");
-#endif
-    return count;
-}
-static DEVICE_ATTR(ir_data, S_IALLUGO,
-	NULL, cx5036_store_ir_data);
 /* mode */
 static ssize_t cx5036_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -744,10 +696,10 @@ static ssize_t cx5036_show_lux(struct device *dev,
     struct cx5036_data *data = input_get_drvdata(input);
 
     /* No LUX data if power down */
-    if (cx5036_get_mode(data->client) == CX5036_SYS_DEV_DOWN)
+    if (cx5036_get_mode(data->client) != CX5036_SYS_ALS_ENABLE)
 	return sprintf((char*) buf, "%s\n", "Please power up first!");
 
-    return sprintf(buf, "%d\n", cx5036_get_adc_value(data->client));
+    return sprintf(buf, "%d\n", cx5036_get_als_value(data->client));
 }
 
 static DEVICE_ATTR(lux, S_IRUGO, cx5036_show_lux, NULL);
@@ -761,7 +713,7 @@ static ssize_t cx5036_show_pxvalue(struct device *dev,
     struct cx5036_data *data = input_get_drvdata(input);
 
     /* No Px data if power down */
-    if (cx5036_get_mode(data->client) == CX5036_SYS_DEV_DOWN)
+    if (cx5036_get_mode(data->client) != CX5036_SYS_PS_ENABLE)
 	return -EBUSY;
 
     return sprintf(buf, "%d\n", cx5036_get_px_value(data->client));
@@ -844,7 +796,7 @@ static ssize_t cx5036_store_ahthres(struct device *dev,
 static DEVICE_ATTR(ahthres, S_IWUSR | S_IRUGO,
 	cx5036_show_ahthres, cx5036_store_ahthres);
 
-/* Px low threshold */
+/* PS low threshold */
 static ssize_t cx5036_show_plthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -874,7 +826,7 @@ static ssize_t cx5036_store_plthres(struct device *dev,
 static DEVICE_ATTR(plthres, S_IWUSR | S_IRUGO,
 	cx5036_show_plthres, cx5036_store_plthres);
 
-/* Px high threshold */
+/* PS high threshold */
 static ssize_t cx5036_show_phthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -947,7 +899,7 @@ static ssize_t cx5036_store_calibration_state(struct device *dev,
 	return -EBUSY;
     }
 
-    lux = cx5036_get_adc_value(data->client);
+    lux = cx5036_get_als_value(data->client);
     cali = stdls * 100 / lux;
 
     return -EBUSY;
@@ -1045,8 +997,8 @@ static int cx5036_init_client(struct i2c_client *client)
     }
 
     /* set defaults */
-    cx5036_set_range(client, CX5036_ALS_RANGE_0);
-    cx5036_set_mode(client, CX5036_SYS_DEV_DOWN);
+    cx5036_set_range(client, CX5036_ALS_GAIN_1);
+    cx5036_set_mode(client, CX5036_SYS_RST_ENABLE);
 
     return 0;
 }
@@ -1067,7 +1019,7 @@ static void pl_timer_callback(unsigned long pl_data)
 
 }
 #endif
-static void plsensor_work_handler(struct work_struct *w)
+static void cx5036_work_handler(struct work_struct *w)
 {
 
     struct cx5036_data *data =
@@ -1081,16 +1033,16 @@ static void plsensor_work_handler(struct work_struct *w)
 
 
     // ALS int
-    if (int_stat & CX5036_REG_SYS_INT_AMASK)
+    if (int_stat & CX5036_REG_SYS_INT_AL_MASK)
     {
 	LDBG("LS INT Status: %0x\n", int_stat);
 	cx5036_change_ls_threshold(data->client);
 	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
-		CX5036_REG_SYS_INT_AMASK, CX5036_REG_SYS_INT_LS_SHIFT, 0);
+		CX5036_REG_SYS_INT_AL_MASK, CX5036_REG_SYS_INT_AL_SHIFT, 0);
     }
 
     // PX int
-    if (int_stat & CX5036_REG_SYS_INT_PMASK)
+    if (int_stat & CX5036_REG_SYS_INT_PS_MASK)
     {
 	int_stat = cx5036_get_intstat(data->client);
 	LDBG("PS INT Status: %0x\n", int_stat);
@@ -1106,7 +1058,7 @@ static void plsensor_work_handler(struct work_struct *w)
 
 	mdelay(5);
 	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
-		CX5036_REG_SYS_INT_PMASK, CX5036_REG_SYS_INT_PS_SHIFT, 0);
+		CX5036_REG_SYS_INT_PS_MASK, CX5036_REG_SYS_INT_PS_SHIFT, 0);
     }
 
       enable_irq(data->client->irq);
@@ -1176,12 +1128,10 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 	dev_err(&client->dev, "failed to register_heartbeatsensor_device\n");
 	goto exit_free_heartbeats_device;
     }
-#if 1
     /* register sysfs hooks */
     err = sysfs_create_group(&data->client->dev.kobj, &cx5036_attr_group);
     if (err)
 	goto exit_free_ps_device;
-#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
     cx5036_early_suspend.suspend = cx5036_suspend;
@@ -1206,7 +1156,7 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 	goto err_create_wq_failed;
     }
 
-    INIT_WORK(&data->plsensor_work, plsensor_work_handler);
+    INIT_WORK(&data->plsensor_work, cx5036_work_handler);
 
 #if POLLING_MODE
     LDBG("Timer module installing\n");
@@ -1252,7 +1202,7 @@ static int __devexit cx5036_remove(struct i2c_client *client)
     unregister_early_suspend(&cx5036_early_suspend);
 #endif
 
-    cx5036_set_mode(client, 0);
+    cx5036_set_mode(client, CX5036_SYS_DEV_DOWN);
     kfree(i2c_get_clientdata(client));
 
     if (data->plsensor_wq)
@@ -1260,7 +1210,7 @@ static int __devexit cx5036_remove(struct i2c_client *client)
 #if POLLING_MODE
     if(&data->pl_timer)
 	del_timer(&data->pl_timer);
-#endifn
+#endif
     return 0;
 }
 
