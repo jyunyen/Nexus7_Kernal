@@ -283,6 +283,48 @@ static const struct i2c_board_info cardhu_i2c2_board_info_ap3xx6[] = {
 };
 #endif
 
+#if defined(CONFIG_SENSORS_CX5036)
+
+#define CX5036_INT_PIN         TEGRA_GPIO_PZ2
+#define CX5036_NAME		"cx5036"
+
+
+static const struct i2c_board_info cardhu_i2c2_board_info_cx5036[] = {
+
+    {
+	I2C_BOARD_INFO(CX5036_NAME,0x1C),
+	.type                   = CX5036_NAME,
+	.addr                   = 0x1C,
+	.flags                  = 0,
+	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+    },
+};
+static int cx5036_init(void)
+{
+    int ret = 0;
+    tegra_gpio_enable(CX5036_INT_PIN);
+    ret = gpio_request(CX5036_INT_PIN, CX5036_NAME);
+    if (ret != 0)
+    {
+	gpio_free(CX5036_INT_PIN);
+	printk(KERN_ERR "request CX5036_INT_PIN fail!\n");
+	return -1;
+    }
+    ret = gpio_direction_input(CX5036_INT_PIN);
+
+
+    if (ret < 0) {
+	pr_err("%s: gpio_direction_input failed %d\n", __func__, ret);
+	gpio_free(CX5036_INT_PIN);
+	return -1;
+    }
+
+    i2c_register_board_info(2, cardhu_i2c2_board_info_cx5036,
+	    ARRAY_SIZE(cardhu_i2c2_board_info_cx5036));
+    return 0;
+}
+
+#endif
 #if defined(CONFIG_SENSORS_AP321XX) 
 
 #define AP321XX_INT_PIN         TEGRA_GPIO_PZ2
@@ -576,6 +618,9 @@ int __init grouper_sensors_init(void)
 	ap3426_init();
 #endif
 
+#if defined(CONFIG_SENSORS_CX5036)
+	cx5036_init();
+#endif
 
 /*
 	i2c_register_board_info(2, cardhu_i2c1_board_info_al3010,
