@@ -57,7 +57,7 @@
 
 
 #define PL_TIMER_DELAY 2000
-#define POLLING_MODE 0
+#define POLLING_MODE 1
 
 #define LSC_DBG
 #ifdef LSC_DBG
@@ -71,6 +71,8 @@ static void cx5036_timer_callback(unsigned long pl_data);
 #endif
 static int cx5036_set_phthres(struct i2c_client *client, int val);
 static int cx5036_set_plthres(struct i2c_client *client, int val);
+static int cx5036_set_ahthres(struct i2c_client *client, int val);
+static int cx5036_set_althres(struct i2c_client *client, int val);
 static void cx5036_change_ls_threshold(struct i2c_client *client);
 
 struct cx5036_data {
@@ -88,15 +90,15 @@ struct cx5036_data {
 #endif
 };
 
-static struct cx5036_data *private_pl_data = NULL;
+static struct cx5036_data *cx5036_data_g = NULL;
 // CX5036 register
 static u8 cx5036_reg[CX5036_NUM_CACHABLE_REGS] = 
 {
-0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x0a, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f
+    0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x0a, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f
 };
 
 // CX5036 range
-static int cx5036_range[4] = {32768,8192,2048,512};
+static int cx5036_range[5] = {65536,16384,3072,2048,1024};
 
 
 static u16 cx5036_threshole[8] = {28,444,625,888,1778,3555,7222,0xffff};
@@ -192,19 +194,40 @@ static int cx5036_set_mode(struct i2c_client *client, int mode)
 {
     int ret;
     if(mode == CX5036_SYS_PS_ENABLE) {
-        ret = __cx5036_write_reg(client, CX5036_REG_PS_GAIN,
-	    CX5036_REG_PS_GAIN_MASK, CX5036_REG_PS_GAIN_SHIFT, 1);
+	LDBG("mode = %x\n", mode);
+	ret = __cx5036_write_reg(client, CX5036_REG_PS_GAIN,
+		CX5036_REG_PS_GAIN_MASK, CX5036_REG_PS_GAIN_SHIFT, 1);
+	ret = __cx5036_write_reg(client, CX5036_REG_PS_TIME,
+		CX5036_REG_PS_TIME_MASK, CX5036_REG_PS_TIME_SHIFT, 3);
 	ret = cx5036_set_plthres(client, 100);
 	ret = cx5036_set_phthres(client, 500);
 	misc_ps_opened = 1;
     } else if(mode == CX5036_SYS_ALS_ENABLE) {
+
+	LDBG("mode = %x\n", mode);
+	ret = __cx5036_write_reg(client, CX5036_REG_ALS_CON,
+		CX5036_REG_ALS_ALGAIN_CON_MASK, CX5036_REG_ALS_ALGAIN_CON_SHIFT, 1);
+	ret = __cx5036_write_reg(client, CX5036_REG_ALS_TIME,
+		CX5036_REG_ALS_TIME_MASK, CX5036_REG_ALS_TIME_SHIFT, 0x3F);//resolution
+	ret = cx5036_set_althres(client, 9830);
+	ret = cx5036_set_ahthres(client, 55704);
 	misc_ls_opened = 1;
-    } else if(mode == (CX5036_SYS_PS_ENABLE & CX5036_SYS_ALS_ENABLE)) {
+    } else if(mode == (CX5036_SYS_PS_ENABLE | CX5036_SYS_ALS_ENABLE)) {
+	LDBG("mode = %x\n", mode);
+	ret = __cx5036_write_reg(client, CX5036_REG_PS_GAIN,
+		CX5036_REG_PS_GAIN_MASK, CX5036_REG_PS_GAIN_SHIFT, 1);
+	ret = __cx5036_write_reg(client, CX5036_REG_ALS_CON,
+		CX5036_REG_ALS_ALGAIN_CON_MASK, CX5036_REG_ALS_ALGAIN_CON_SHIFT, 4);
+	ret = __cx5036_write_reg(client, CX5036_REG_ALS_TIME,
+		CX5036_REG_ALS_TIME_MASK, CX5036_REG_ALS_TIME_SHIFT, 0x3F);
 	ret = cx5036_set_plthres(client, 100);
 	ret = cx5036_set_phthres(client, 500);
+	ret = cx5036_set_althres(client, 9830);
+	ret = cx5036_set_ahthres(client, 55704);
 	misc_ps_opened = 1;
 	misc_ls_opened = 1;
     } else if(mode == CX5036_SYS_DEV_DOWN) {
+	LDBG("mode = %x\n", mode);
 	misc_ps_opened = 0;
 	misc_ls_opened = 0;
     }
@@ -344,12 +367,18 @@ static int cx5036_get_als_value(struct i2c_client *client)
 
     err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFR,
 	    CX5036_REG_LUM_COEFR_MASK, CX5036_REG_LUM_COEFR_SHIFT, 1);
+    if(err < 0) {
+	return err;
+    }
     err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFG,
 	    CX5036_REG_LUM_COEFG_MASK, CX5036_REG_LUM_COEFG_SHIFT, 1);
+    if(err < 0) {
+	return err;
+    }
     err = __cx5036_write_reg(client, CX5036_REG_LUM_COEFB,
 	    CX5036_REG_LUM_COEFB_MASK, CX5036_REG_LUM_COEFB_SHIFT, 1);
     if(err < 0) {
-	return 
+	return err;
     }
     lsb = i2c_smbus_read_byte_data(client, CX5036_REG_L_DATA_LOW);
 
@@ -601,18 +630,18 @@ static void cx5036_suspend(struct early_suspend *h)
 {
 
     if (misc_ps_opened)
-	cx5036_psensor_disable(private_pl_data -> client);
+	cx5036_psensor_disable(cx5036_data_g -> client);
     if (misc_ls_opened)
-	cx5036_lsensor_disable(private_pl_data -> client);
+	cx5036_lsensor_disable(cx5036_data_g -> client);
 }
 
 static void cx5036_resume(struct early_suspend *h)
 {
 
     if (misc_ls_opened)
-	cx5036_lsensor_enable(private_pl_data -> client);
+	cx5036_lsensor_enable(cx5036_data_g -> client);
     if (misc_ps_opened)
-	cx5036_psensor_enable(private_pl_data -> client);
+	cx5036_psensor_enable(cx5036_data_g -> client);
 }
 #endif
 
@@ -621,8 +650,7 @@ static void cx5036_resume(struct early_suspend *h)
 static ssize_t cx5036_show_range(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%i\n", cx5036_get_range(data->client));
 }
 
@@ -630,8 +658,7 @@ static ssize_t cx5036_store_range(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
@@ -645,8 +672,6 @@ static ssize_t cx5036_store_range(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
-	cx5036_show_range, cx5036_store_range);
 
 
 
@@ -654,72 +679,63 @@ static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
 static ssize_t cx5036_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_mode(data->client));
 }
 
 static ssize_t cx5036_store_mode(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
-    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 7))
+    if ((strict_strtoul(buf, 10, &val) < 0))
 	return -EINVAL;
-
     ret = cx5036_set_mode(data->client, val);
 
     if (ret < 0)
 	return ret;
 #if POLLING_MODE
-    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies);
     ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
-    if(ret) 
+    if(!ret) 
 	LDBG("Timer Error\n");
 #endif
     return count;
 }
 
-static DEVICE_ATTR(mode, S_IRUGO | S_IWUGO,
-	cx5036_show_mode, cx5036_store_mode);
 
 
 /* lux */
 static ssize_t cx5036_show_lux(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
 
     /* No LUX data if power down */
-    if (cx5036_get_mode(data->client) != CX5036_SYS_ALS_ENABLE)
+    if (cx5036_get_mode(cx5036_data_g->client) != CX5036_SYS_ALS_ENABLE)
 	return sprintf((char*) buf, "%s\n", "Please power up first!");
 
     return sprintf(buf, "%d\n", cx5036_get_als_value(data->client));
 }
 
-static DEVICE_ATTR(lux, S_IRUGO, cx5036_show_lux, NULL);
 
 
 /* Px data */
 static ssize_t cx5036_show_pxvalue(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
 
     /* No Px data if power down */
-    if (cx5036_get_mode(data->client) != CX5036_SYS_PS_ENABLE)
+    if (cx5036_get_mode(cx5036_data_g->client) != CX5036_SYS_PS_ENABLE)
 	return -EBUSY;
 
     return sprintf(buf, "%d\n", cx5036_get_px_value(data->client));
 }
 
-static DEVICE_ATTR(pxvalue, S_IRUGO, cx5036_show_pxvalue, NULL);
 
 
 /* proximity object detect */
@@ -727,28 +743,24 @@ static ssize_t cx5036_show_object(struct device *dev,
 	struct device_attribute *attr,
 	char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_object(data->client));
 }
 
-static DEVICE_ATTR(object, S_IRUGO, cx5036_show_object, NULL);
 
 
 /* ALS low threshold */
 static ssize_t cx5036_show_althres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_althres(data->client));
 }
 
 static ssize_t cx5036_store_althres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
@@ -762,24 +774,20 @@ static ssize_t cx5036_store_althres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(althres, S_IWUSR | S_IRUGO,
-	cx5036_show_althres, cx5036_store_althres);
 
 
 /* ALS high threshold */
 static ssize_t cx5036_show_ahthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_ahthres(data->client));
 }
 
 static ssize_t cx5036_store_ahthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
@@ -793,23 +801,19 @@ static ssize_t cx5036_store_ahthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(ahthres, S_IWUSR | S_IRUGO,
-	cx5036_show_ahthres, cx5036_store_ahthres);
 
 /* PS low threshold */
 static ssize_t cx5036_show_plthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_plthres(data->client));
 }
 
 static ssize_t cx5036_store_plthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
@@ -823,23 +827,19 @@ static ssize_t cx5036_store_plthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(plthres, S_IWUSR | S_IRUGO,
-	cx5036_show_plthres, cx5036_store_plthres);
 
 /* PS high threshold */
 static ssize_t cx5036_show_phthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     return sprintf(buf, "%d\n", cx5036_get_phthres(data->client));
 }
 
 static ssize_t cx5036_store_phthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     unsigned long val;
     int ret;
 
@@ -853,8 +853,6 @@ static ssize_t cx5036_store_phthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(phthres, S_IWUSR | S_IRUGO,
-	cx5036_show_phthres, cx5036_store_phthres);
 
 
 /* calibration */
@@ -869,8 +867,7 @@ static ssize_t cx5036_store_calibration_state(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct cx5036_data *data = input_get_drvdata(input);
+    struct cx5036_data *data = cx5036_data_g;
     int stdls, lux; 
     char tmp[10];
 
@@ -905,8 +902,6 @@ static ssize_t cx5036_store_calibration_state(struct device *dev,
     return -EBUSY;
 }
 
-static DEVICE_ATTR(calibration, S_IWUSR | S_IRUGO,
-	cx5036_show_calibration_state, cx5036_store_calibration_state);
 
 #ifdef LSC_DBG
 /* engineer mode */
@@ -914,8 +909,7 @@ static ssize_t cx5036_em_read(struct device *dev,
 	struct device_attribute *attr,
 	char *buf)
 {
-    struct i2c_client *client = to_i2c_client(dev);
-    struct cx5036_data *data = i2c_get_clientdata(client);
+    struct cx5036_data *data = cx5036_data_g;
     int i;
     u8 tmp;
 
@@ -935,8 +929,7 @@ static ssize_t cx5036_em_write(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct i2c_client *client = to_i2c_client(dev);
-    struct cx5036_data *data = i2c_get_clientdata(client);
+    struct cx5036_data *data = cx5036_data_g;
     u32 addr,val,idx=0;
     int ret = 0;
 
@@ -953,29 +946,24 @@ static ssize_t cx5036_em_write(struct device *dev,
 
     return count;
 }
-static DEVICE_ATTR(em, S_IWUSR |S_IRUGO,
-	cx5036_em_read, cx5036_em_write);
 #endif
 
-static struct attribute *cx5036_attributes[] = {
-    &dev_attr_range.attr,
-    &dev_attr_mode.attr,
-    &dev_attr_lux.attr,
-    &dev_attr_object.attr,
-    &dev_attr_pxvalue.attr,
-    &dev_attr_althres.attr,
-    &dev_attr_ahthres.attr,
-    &dev_attr_plthres.attr,
-    &dev_attr_phthres.attr,
-    &dev_attr_calibration.attr,
+
+static struct device_attribute attributes[] = {
+    __ATTR(range, S_IWUSR | S_IRUGO, cx5036_show_range, cx5036_store_range),
+    __ATTR(mode, 0666, cx5036_show_mode, cx5036_store_mode),
+    __ATTR(lux, S_IRUGO, cx5036_show_lux, NULL),
+    __ATTR(pxvalue, S_IRUGO, cx5036_show_pxvalue, NULL),
+    __ATTR(object, S_IRUGO, cx5036_show_object, NULL),
+    __ATTR(althres, S_IWUSR | S_IRUGO, cx5036_show_althres, cx5036_store_althres),
+    __ATTR(ahthres, S_IWUSR | S_IRUGO, cx5036_show_ahthres, cx5036_store_ahthres),
+    __ATTR(plthres, S_IWUSR | S_IRUGO, cx5036_show_plthres, cx5036_store_plthres),
+    __ATTR(phthres, S_IWUSR | S_IRUGO, cx5036_show_phthres, cx5036_store_phthres),
+    __ATTR(calibration, S_IWUSR | S_IRUGO, cx5036_show_calibration_state, cx5036_store_calibration_state),
 #ifdef LSC_DBG
-    &dev_attr_em.attr,
+    __ATTR(em, S_IWUSR | S_IRUGO, cx5036_em_read, cx5036_em_write),
 #endif
-    NULL
-};
 
-static const struct attribute_group cx5036_attr_group = {
-    .attrs = cx5036_attributes,
 };
 
 static int cx5036_init_client(struct i2c_client *client)
@@ -1004,15 +992,15 @@ static int cx5036_init_client(struct i2c_client *client)
 }
 
 #if POLLING_MODE
-static void pl_timer_callback(unsigned long pl_data)
+static void cx5036_timer_callback(unsigned long pl_data)
 {
     struct cx5036_data *data;
     int ret =0;
 
-    data = private_pl_data;
+    data = cx5036_data_g;
     queue_work(data->plsensor_wq, &data->plsensor_work);
 
-    ret = mod_timer(&private_pl_data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+    ret = mod_timer(&cx5036_data_g->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(ret) 
 	LDBG("Timer Error\n");
@@ -1060,8 +1048,9 @@ static void cx5036_work_handler(struct work_struct *w)
 	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
 		CX5036_REG_SYS_INT_PS_MASK, CX5036_REG_SYS_INT_PS_SHIFT, 0);
     }
-
-      enable_irq(data->client->irq);
+#if !defined(POLLING_MODE)
+    enable_irq(data->client->irq);
+#endif
 }
 /*
  * I2C layer
@@ -1076,6 +1065,42 @@ static irqreturn_t cx5036_irq(int irq, void *data_)
     queue_work(data->plsensor_wq, &data->plsensor_work);
 
     return IRQ_HANDLED;
+}
+static int create_sysfs_interfaces(struct cx5036_data *sensor)
+{
+    int i;
+    struct class *cx5036_class = NULL;
+    struct device *cx5036_dev = NULL;
+    int ret;
+
+    cx5036_class = class_create(THIS_MODULE, "sensors");
+    if (IS_ERR(cx5036_class)) {
+	ret = PTR_ERR(cx5036_class);
+	cx5036_class = NULL;
+	LDBG("%s: could not allocate cx5036_class, ret = %d\n", __func__, ret);
+	goto cx5036_class_error;
+    }
+
+    cx5036_dev= device_create(cx5036_class,
+	    NULL, 0, "%s", "di_sensors");
+
+    if(cx5036_dev == NULL)
+	goto cx5036_device_error;
+    for (i = 0; i < ARRAY_SIZE(attributes); i++)
+	if (device_create_file(cx5036_dev, attributes + i))
+	    goto cx5036_create_file_error;
+
+    return 0;
+
+cx5036_create_file_error:
+    for ( ; i >= 0; i--)
+	device_remove_file(cx5036_dev, attributes + i);
+
+cx5036_device_error:
+    class_destroy(cx5036_class);
+cx5036_class_error:
+    dev_err(&sensor->client->dev, "%s:Unable to create interface\n", __func__);
+    return -1;
 }
 
 static int __devinit cx5036_probe(struct i2c_client *client,
@@ -1129,7 +1154,8 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 	goto exit_free_heartbeats_device;
     }
     /* register sysfs hooks */
-    err = sysfs_create_group(&data->client->dev.kobj, &cx5036_attr_group);
+
+    err = create_sysfs_interfaces(data);
     if (err)
 	goto exit_free_ps_device;
 
@@ -1160,11 +1186,11 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 
 #if POLLING_MODE
     LDBG("Timer module installing\n");
-    setup_timer(&data->pl_timer, pl_timer_callback, 0);
+    setup_timer(&data->pl_timer, cx5036_timer_callback, 0);
 #endif
 
 
-    private_pl_data = data;
+    cx5036_data_g = data;
     dev_info(&client->dev, "Driver version %s enabled\n", DRIVER_VERSION);
     return 0;
 err_create_wq_failed:
@@ -1194,7 +1220,6 @@ static int __devexit cx5036_remove(struct i2c_client *client)
     struct cx5036_data *data = i2c_get_clientdata(client);
     free_irq(data->irq, data);
 
-    sysfs_remove_group(&data->client->dev.kobj, &cx5036_attr_group);
     cx5036_unregister_psensor_device(client,data);
     cx5036_unregister_lsensor_device(client,data);
     cx5036_unregister_heartbeat_device(client,data);

@@ -56,11 +56,11 @@
 #define CX5036_ALS_GAIN_64  0x3
 
 
-#define CX5036_SYS_MGS_ENABLE 0x08
-#define CX5036_SYS_RST_ENABLE 0x04
-#define CX5036_SYS_PS_ENABLE 0x02
-#define CX5036_SYS_ALS_ENABLE 0x01
-#define CX5036_SYS_DEV_DOWN 0x00
+#define CX5036_SYS_MGS_ENABLE 0x8
+#define CX5036_SYS_RST_ENABLE 0x4
+#define CX5036_SYS_PS_ENABLE 0x2
+#define CX5036_SYS_ALS_ENABLE 0x1
+#define CX5036_SYS_DEV_DOWN 0x0
 
 
 
@@ -115,6 +115,8 @@
 /* cx5036 ALS time Register */
 #define CX5036_REG_ALS_TIME    0x0A
 #define CX5036_REG_ALS_TIME_MASK    0xFF
+#define CX5036_REG_ALS_TIME_SHIFT    (0)
+
 
 /* cx5036 PS gain Register */
 #define CX5036_REG_PS_GAIN    0x0C
@@ -129,6 +131,7 @@
 /* cx5036 PS time Register */
 #define CX5036_REG_PS_TIME    0x0F
 #define CX5036_REG_PS_TIME_MASK    0x03
+#define CX5036_REG_PS_TIME_SHIFT   (0)
 
 
 /* cx5036 PS LED control Register */
