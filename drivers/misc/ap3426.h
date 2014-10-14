@@ -49,7 +49,7 @@
 #define AP3426_ERR_IDENTIFICATION			-6
 
 
-#define AP3426_NUM_CACHABLE_REGS	28
+#define AP3426_NUM_CACHABLE_REGS	30
 
 /* ap3426 control registers */
 /*============================================================================*/

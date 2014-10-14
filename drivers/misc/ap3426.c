@@ -66,7 +66,7 @@
 
 #define LSC_DBG
 #ifdef LSC_DBG
-#define LDBG(s,args...)	{printk("LDBG: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
+#define LDBG(s,args...)	{printk("AP3426: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
 #else
 #define LDBG(s,args...) {}
 #endif
@@ -76,6 +76,7 @@ static void pl_timer_callback(unsigned long pl_data);
 #endif
 static int ap3426_set_phthres(struct i2c_client *client, int val);
 static int ap3426_set_plthres(struct i2c_client *client, int val);
+static void ap3426_change_ls_threshold(struct i2c_client *client);
 
 struct ap3426_data {
     struct i2c_client *client;
@@ -92,7 +93,7 @@ struct ap3426_data {
 #endif
 };
 
-static struct ap3426_data *private_pl_data = NULL;
+static struct ap3426_data *ap3426_data_g = NULL;
 // AP3426 register
 static u8 ap3426_reg[AP3426_NUM_CACHABLE_REGS] = 
 {0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
@@ -186,7 +187,7 @@ static int ap3426_set_ir_data(struct i2c_client *client, int en)
 {
     int ret = 0;
 
-    if(en == 2) {
+    if(en == 9) {
 	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
 		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
 	mdelay(200);
@@ -205,11 +206,10 @@ static int ap3426_set_ir_data(struct i2c_client *client, int en)
 	ret = ap3426_set_plthres(client, 0);
 	ret = ap3426_set_phthres(client, 535);
 	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, en);
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
     }else if(en == 0){
-	LDBG("%s",__func__);
 	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
 	mdelay(200);
     }
 
@@ -228,11 +228,17 @@ static int ap3426_get_mode(struct i2c_client *client)
 static int ap3426_set_mode(struct i2c_client *client, int mode)
 {
     int ret;
+
+    ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+	    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+
     if(mode == AP3426_SYS_PS_ENABLE) {
+
 	ret = ap3426_set_plthres(client, 100);
 	ret = ap3426_set_phthres(client, 500);
 	misc_ps_opened = 1;
     } else if(mode == AP3426_SYS_ALS_ENABLE) {
+	ap3426_change_ls_threshold(client);
 	misc_ls_opened = 1;
     } else if(mode == AP3426_SYS_ALS_PS_ENABLE) {
 	ret = ap3426_set_plthres(client, 100);
@@ -392,9 +398,9 @@ static int ap3426_get_adc_value(struct i2c_client *client)
     tmp = tmp * cali / 100;
     //LDBG("ALS val=%d lux\n",tmp);
 #endif
-    val = msb << 8 | lsb;
+    //val = msb << 8 | lsb;
 
-    return val;
+    return tmp;
 }
 
 
@@ -440,7 +446,6 @@ static int ap3426_get_px_value(struct i2c_client *client)
     return (u32)(((msb & AL3426_REG_PS_DATA_HIGH_MASK) << 8) | (lsb & AL3426_REG_PS_DATA_LOW_MASK));
 }
 
-static void ap3426_change_ls_threshold(struct i2c_client *client);
 
 
 
@@ -539,7 +544,6 @@ static void ap3426_unregister_heartbeat_device(struct i2c_client *client, struct
 }
 static void ap3426_change_ls_threshold(struct i2c_client *client)
 {
-    struct ap3426_data *data = i2c_get_clientdata(client);
     int value;
 
     value = ap3426_get_adc_value(client);
@@ -552,8 +556,6 @@ static void ap3426_change_ls_threshold(struct i2c_client *client)
 	ap3426_set_ahthres(client,ap3426_threshole[value]);
     }
 
-    input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
-    input_sync(data->lsensor_input_dev);
 
 }
 
@@ -629,18 +631,18 @@ static void ap3426_suspend(struct early_suspend *h)
 {
 
     if (misc_ps_opened)
-	ap3426_psensor_disable(private_pl_data -> client);
+	ap3426_psensor_disable(ap3426_data_g -> client);
     if (misc_ls_opened)
-	ap3426_lsensor_disable(private_pl_data -> client);
+	ap3426_lsensor_disable(ap3426_data_g -> client);
 }
 
 static void ap3426_resume(struct early_suspend *h)
 {
 
     if (misc_ls_opened)
-	ap3426_lsensor_enable(private_pl_data -> client);
+	ap3426_lsensor_enable(ap3426_data_g -> client);
     if (misc_ps_opened)
-	ap3426_psensor_enable(private_pl_data -> client);
+	ap3426_psensor_enable(ap3426_data_g -> client);
 }
 #endif
 
@@ -649,8 +651,7 @@ static void ap3426_resume(struct early_suspend *h)
 static ssize_t ap3426_show_range(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%i\n", ap3426_get_range(data->client));
 }
 
@@ -658,8 +659,7 @@ static ssize_t ap3426_store_range(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
@@ -673,20 +673,17 @@ static ssize_t ap3426_store_range(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
-	ap3426_show_range, ap3426_store_range);
 
 
 
 static ssize_t ap3426_store_ir_data(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
-    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 7))
+    if (strict_strtoul(buf, 10, &val) < 0)
 	return -EINVAL;
 
     ret = ap3426_set_ir_data(data->client, val);
@@ -701,26 +698,22 @@ static ssize_t ap3426_store_ir_data(struct device *dev,
 #endif
     return count;
 }
-static DEVICE_ATTR(ir_data, S_IALLUGO,
-	NULL, ap3426_store_ir_data);
 /* mode */
 static ssize_t ap3426_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_mode(data->client));
 }
 
 static ssize_t ap3426_store_mode(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
-    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 7))
+    if (strict_strtoul(buf, 10, &val) < 0)
 	return -EINVAL;
 
     ret = ap3426_set_mode(data->client, val);
@@ -737,16 +730,13 @@ static ssize_t ap3426_store_mode(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(mode, S_IRUGO | S_IWUGO,
-	ap3426_show_mode, ap3426_store_mode);
 
 
 /* lux */
 static ssize_t ap3426_show_lux(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
 
     /* No LUX data if power down */
     if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
@@ -755,15 +745,13 @@ static ssize_t ap3426_show_lux(struct device *dev,
     return sprintf(buf, "%d\n", ap3426_get_adc_value(data->client));
 }
 
-static DEVICE_ATTR(lux, S_IRUGO, ap3426_show_lux, NULL);
 
 
 /* Px data */
 static ssize_t ap3426_show_pxvalue(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
 
     /* No Px data if power down */
     if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
@@ -772,7 +760,6 @@ static ssize_t ap3426_show_pxvalue(struct device *dev,
     return sprintf(buf, "%d\n", ap3426_get_px_value(data->client));
 }
 
-static DEVICE_ATTR(pxvalue, S_IRUGO, ap3426_show_pxvalue, NULL);
 
 
 /* proximity object detect */
@@ -780,28 +767,24 @@ static ssize_t ap3426_show_object(struct device *dev,
 	struct device_attribute *attr,
 	char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_object(data->client));
 }
 
-static DEVICE_ATTR(object, S_IRUGO, ap3426_show_object, NULL);
 
 
 /* ALS low threshold */
 static ssize_t ap3426_show_althres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_althres(data->client));
 }
 
 static ssize_t ap3426_store_althres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
@@ -815,24 +798,20 @@ static ssize_t ap3426_store_althres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(althres, S_IWUSR | S_IRUGO,
-	ap3426_show_althres, ap3426_store_althres);
 
 
 /* ALS high threshold */
 static ssize_t ap3426_show_ahthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_ahthres(data->client));
 }
 
 static ssize_t ap3426_store_ahthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
@@ -846,23 +825,19 @@ static ssize_t ap3426_store_ahthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(ahthres, S_IWUSR | S_IRUGO,
-	ap3426_show_ahthres, ap3426_store_ahthres);
 
 /* Px low threshold */
 static ssize_t ap3426_show_plthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_plthres(data->client));
 }
 
 static ssize_t ap3426_store_plthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
@@ -876,23 +851,19 @@ static ssize_t ap3426_store_plthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(plthres, S_IWUSR | S_IRUGO,
-	ap3426_show_plthres, ap3426_store_plthres);
 
 /* Px high threshold */
 static ssize_t ap3426_show_phthres(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     return sprintf(buf, "%d\n", ap3426_get_phthres(data->client));
 }
 
 static ssize_t ap3426_store_phthres(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     unsigned long val;
     int ret;
 
@@ -906,8 +877,6 @@ static ssize_t ap3426_store_phthres(struct device *dev,
     return count;
 }
 
-static DEVICE_ATTR(phthres, S_IWUSR | S_IRUGO,
-	ap3426_show_phthres, ap3426_store_phthres);
 
 
 /* calibration */
@@ -922,8 +891,7 @@ static ssize_t ap3426_store_calibration_state(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct input_dev *input = to_input_dev(dev);
-    struct ap3426_data *data = input_get_drvdata(input);
+    struct ap3426_data *data = ap3426_data_g;
     int stdls, lux; 
     char tmp[10];
 
@@ -958,8 +926,6 @@ static ssize_t ap3426_store_calibration_state(struct device *dev,
     return -EBUSY;
 }
 
-static DEVICE_ATTR(calibration, S_IWUSR | S_IRUGO,
-	ap3426_show_calibration_state, ap3426_store_calibration_state);
 
 #ifdef LSC_DBG
 /* engineer mode */
@@ -967,8 +933,7 @@ static ssize_t ap3426_em_read(struct device *dev,
 	struct device_attribute *attr,
 	char *buf)
 {
-    struct i2c_client *client = to_i2c_client(dev);
-    struct ap3426_data *data = i2c_get_clientdata(client);
+    struct ap3426_data *data = ap3426_data_g;
     int i;
     u8 tmp;
 
@@ -988,8 +953,7 @@ static ssize_t ap3426_em_write(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-    struct i2c_client *client = to_i2c_client(dev);
-    struct ap3426_data *data = i2c_get_clientdata(client);
+    struct ap3426_data *data = ap3426_data_g;
     u32 addr,val,idx=0;
     int ret = 0;
 
@@ -1006,38 +970,69 @@ static ssize_t ap3426_em_write(struct device *dev,
 
     return count;
 }
-static DEVICE_ATTR(em, S_IWUSR |S_IRUGO,
-	ap3426_em_read, ap3426_em_write);
 #endif
 
-static struct attribute *ap3426_attributes[] = {
-    &dev_attr_range.attr,
-    &dev_attr_mode.attr,
-    &dev_attr_lux.attr,
-    &dev_attr_object.attr,
-    &dev_attr_pxvalue.attr,
-    &dev_attr_althres.attr,
-    &dev_attr_ahthres.attr,
-    &dev_attr_plthres.attr,
-    &dev_attr_phthres.attr,
-    &dev_attr_calibration.attr,
+
+static struct device_attribute attributes[] = {
+    __ATTR(range, S_IWUSR | S_IRUGO, ap3426_show_range, ap3426_store_range),
+    __ATTR(mode, 0666, ap3426_show_mode, ap3426_store_mode),
+    __ATTR(lux, S_IRUGO, ap3426_show_lux, NULL),
+    __ATTR(pxvalue, S_IRUGO, ap3426_show_pxvalue, NULL),
+    __ATTR(object, S_IRUGO, ap3426_show_object, NULL),
+    __ATTR(althres, S_IWUSR | S_IRUGO, ap3426_show_althres, ap3426_store_althres),
+    __ATTR(ahthres, S_IWUSR | S_IRUGO, ap3426_show_ahthres, ap3426_store_ahthres),
+    __ATTR(plthres, S_IWUSR | S_IRUGO, ap3426_show_plthres, ap3426_store_plthres),
+    __ATTR(phthres, S_IWUSR | S_IRUGO, ap3426_show_phthres, ap3426_store_phthres),
+    __ATTR(calibration, S_IWUSR | S_IRUGO, ap3426_show_calibration_state, ap3426_store_calibration_state),
+    __ATTR(ir_data, 0666, NULL, ap3426_store_ir_data),
 #ifdef LSC_DBG
-    &dev_attr_em.attr,
+    __ATTR(em, S_IWUSR | S_IRUGO, ap3426_em_read, ap3426_em_write),
 #endif
-    NULL
+
 };
 
-static const struct attribute_group ap3426_attr_group = {
-    .attrs = ap3426_attributes,
-};
+static int create_sysfs_interfaces(struct ap3426_data *sensor)
+{
+    int i;
+    struct class *ap3426_class = NULL;
+    struct device *ap3426_dev = NULL;
+    int ret;
 
+    ap3426_class = class_create(THIS_MODULE, "sensors");
+    if (IS_ERR(ap3426_class)) {
+	ret = PTR_ERR(ap3426_class);
+	ap3426_class = NULL;
+	LDBG("%s: could not allocate ap3426_class, ret = %d\n", __func__, ret);
+	goto ap3426_class_error;
+    }
+
+    ap3426_dev= device_create(ap3426_class,
+	    NULL, 0, "%s", "di_sensors");
+
+    if(ap3426_dev == NULL)
+	goto ap3426_device_error;
+    for (i = 0; i < ARRAY_SIZE(attributes); i++)
+	if (device_create_file(ap3426_dev, attributes + i))
+	    goto ap3426_create_file_error;
+
+    return 0;
+
+ap3426_create_file_error:
+    for ( ; i >= 0; i--)
+	device_remove_file(ap3426_dev, attributes + i);
+
+ap3426_device_error:
+    class_destroy(ap3426_class);
+ap3426_class_error:
+    dev_err(&sensor->client->dev, "%s:Unable to create interface\n", __func__);
+    return -1;
+}
 static int ap3426_init_client(struct i2c_client *client)
 {
     struct ap3426_data *data = i2c_get_clientdata(client);
     int i;
 
     LDBG("DEBUG ap3426_init_client..\n");
-
 
     /* read all the registers once to fill the cache.
      * if one of the reads fails, we consider the init failed */
@@ -1048,8 +1043,8 @@ static int ap3426_init_client(struct i2c_client *client)
 
 	data->reg_cache[i] = v;
     }
-
     /* set defaults */
+    
     ap3426_set_range(client, AP3426_ALS_RANGE_0);
     ap3426_set_mode(client, AP3426_SYS_DEV_DOWN);
 
@@ -1062,10 +1057,10 @@ static void pl_timer_callback(unsigned long pl_data)
     struct ap3426_data *data;
     int ret =0;
 
-    data = private_pl_data;
+    data = ap3426_data_g;
     queue_work(data->plsensor_wq, &data->plsensor_work);
 
-    ret = mod_timer(&private_pl_data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+    ret = mod_timer(&ap3426_data_g->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(ret) 
 	LDBG("Timer Error\n");
@@ -1081,6 +1076,7 @@ static void plsensor_work_handler(struct work_struct *w)
     int pxvalue;
     int Pval;
     int ret;
+    int value;
 
     int_stat = ap3426_get_intstat(data->client);
 
@@ -1089,7 +1085,10 @@ static void plsensor_work_handler(struct work_struct *w)
     if (int_stat & AP3426_REG_SYS_INT_AMASK)
     {
 	LDBG("LS INT Status: %0x\n", int_stat);
-	ap3426_change_ls_threshold(data->client);
+
+	value = ap3426_get_adc_value(data->client);
+	input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
+	input_sync(data->lsensor_input_dev);
 	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
 		AP3426_REG_SYS_INT_AMASK, AP3426_REG_SYS_INT_LS_SHIFT, 0);
     }
@@ -1181,12 +1180,10 @@ static int __devinit ap3426_probe(struct i2c_client *client,
 	dev_err(&client->dev, "failed to register_heartbeatsensor_device\n");
 	goto exit_free_heartbeats_device;
     }
-#if 1
-    /* register sysfs hooks */
-    err = sysfs_create_group(&data->client->dev.kobj, &ap3426_attr_group);
+
+    err = create_sysfs_interfaces(data);
     if (err)
 	goto exit_free_ps_device;
-#endif
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
     ap3426_early_suspend.suspend = ap3426_suspend;
@@ -1219,7 +1216,7 @@ static int __devinit ap3426_probe(struct i2c_client *client,
 #endif
 
 
-    private_pl_data = data;
+    ap3426_data_g = data;
     dev_info(&client->dev, "Driver version %s enabled\n", DRIVER_VERSION);
     return 0;
 err_create_wq_failed:
@@ -1249,7 +1246,6 @@ static int __devexit ap3426_remove(struct i2c_client *client)
     struct ap3426_data *data = i2c_get_clientdata(client);
     free_irq(data->irq, data);
 
-    sysfs_remove_group(&data->client->dev.kobj, &ap3426_attr_group);
     ap3426_unregister_psensor_device(client,data);
     ap3426_unregister_lsensor_device(client,data);
     ap3426_unregister_heartbeat_device(client,data);

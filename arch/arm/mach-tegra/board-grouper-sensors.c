@@ -371,14 +371,14 @@ static int ap321xx_init(void)
 #if defined(CONFIG_SENSORS_AP3426)
 
 #define AP3426_INT_PIN         TEGRA_GPIO_PZ2
-#define AP3426_NAME		"AP3426"
+#define AP3426_NAME		"ap3426"
 
 
 static const struct i2c_board_info cardhu_i2c2_board_info_ap3426[] = {
 
     {
-	I2C_BOARD_INFO("ap3426",0x1E),
-	.type                   = "ap3426",
+	I2C_BOARD_INFO(AP3426_NAME,0x1E),
+	.type                   = AP3426_NAME,
 	.addr                   = 0x1E,
 	.flags                  = 0,
 	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
