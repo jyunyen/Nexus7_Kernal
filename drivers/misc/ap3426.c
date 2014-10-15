@@ -76,13 +76,13 @@ static void pl_timer_callback(unsigned long pl_data);
 #endif
 static int ap3426_set_phthres(struct i2c_client *client, int val);
 static int ap3426_set_plthres(struct i2c_client *client, int val);
-static void ap3426_change_ls_threshold(struct i2c_client *client);
 
 struct ap3426_data {
     struct i2c_client *client;
     u8 reg_cache[AP3426_NUM_CACHABLE_REGS];//TO-DO
     u8 power_state_before_suspend;
     int irq;
+    int hsensor_enable;
     struct input_dev	*psensor_input_dev;
     struct input_dev	*lsensor_input_dev;
     struct input_dev	*hsensor_input_dev;
@@ -97,14 +97,13 @@ static struct ap3426_data *ap3426_data_g = NULL;
 // AP3426 register
 static u8 ap3426_reg[AP3426_NUM_CACHABLE_REGS] = 
 {0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-    0x10,0x1A,0x1B,0x1C,0x1D,
+    0x10,0x14,0x1A,0x1B,0x1C,0x1D,
     0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D, 0x30, 0x32};
 
 // AP3426 range
 static int ap3426_range[4] = {32768,8192,2048,512};
 
 
-static u16 ap3426_threshole[8] = {28,444,625,888,1778,3555,7222,0xffff};
 
 static u8 *reg_array;
 static int *range;
@@ -114,6 +113,10 @@ static int cali = 100;
 static int misc_ps_opened = 0;
 static int misc_ls_opened = 0;
 
+static DEFINE_MUTEX(ap3426_lock);
+static DEFINE_MUTEX(ap3426_ls_lock);
+static DEFINE_MUTEX(ap3426_ps_lock);
+static DEFINE_MUTEX(ap3426_heartbeat_lock);
 #define ADD_TO_IDX(addr,idx)	{														\
     int i;												\
     for(i = 0; i < reg_num; i++)						\
@@ -230,30 +233,8 @@ static int ap3426_set_mode(struct i2c_client *client, int mode)
     int ret;
 
     ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-	    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
-
-    if(mode == AP3426_SYS_PS_ENABLE) {
-
-	ret = ap3426_set_plthres(client, 100);
-	ret = ap3426_set_phthres(client, 500);
-	misc_ps_opened = 1;
-    } else if(mode == AP3426_SYS_ALS_ENABLE) {
-	ap3426_change_ls_threshold(client);
-	misc_ls_opened = 1;
-    } else if(mode == AP3426_SYS_ALS_PS_ENABLE) {
-	ret = ap3426_set_plthres(client, 100);
-	ret = ap3426_set_phthres(client, 500);
-	misc_ps_opened = 1;
-	misc_ls_opened = 1;
-    } else if(mode == AP3426_SYS_DEV_DOWN) {
-	misc_ps_opened = 0;
-	misc_ls_opened = 0;
-    }
-
-
-
-    ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
 	    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, mode);
+
     return ret;
 }
 
@@ -392,15 +373,12 @@ static int ap3426_get_adc_value(struct i2c_client *client)
     if (msb < 0)
 	return msb;
 
-#ifdef LSC_DBG
     range = ap3426_get_range(client);
+
     tmp = (((msb << 8) | lsb) * range) >> 16;
     tmp = tmp * cali / 100;
-    //LDBG("ALS val=%d lux\n",tmp);
-#endif
-    //val = msb << 8 | lsb;
-
-    return tmp;
+    val = msb << 8 | lsb;
+    return val;
 }
 
 
@@ -526,9 +504,8 @@ static int ap3426_register_heartbeat_sensor_device(struct i2c_client *client, st
     input_set_drvdata(input_dev, data);
     input_dev->name = "heartbeat";
     input_dev->dev.parent = &client->dev;
-    set_bit(EV_ABS, input_dev->evbit);
-    input_set_abs_params(input_dev, ABS_WHEEL, 0, 8, 0, 0);
-
+    set_bit(EV_REL, input_dev->evbit);
+    input_set_capability(input_dev, EV_REL, ABS_WHEEL);
     rc = input_register_device(input_dev);
     if (rc < 0) {
 	pr_err("%s: could not register input device for heartbeat sensor\n", __FUNCTION__);
@@ -542,23 +519,6 @@ static void ap3426_unregister_heartbeat_device(struct i2c_client *client, struct
 {
     input_unregister_device(data->hsensor_input_dev);
 }
-static void ap3426_change_ls_threshold(struct i2c_client *client)
-{
-    int value;
-
-    value = ap3426_get_adc_value(client);
-    if(value > 0){
-	ap3426_set_althres(client,ap3426_threshole[value-1]);
-	ap3426_set_ahthres(client,ap3426_threshole[value]);
-    }
-    else{
-	ap3426_set_althres(client,0);
-	ap3426_set_ahthres(client,ap3426_threshole[value]);
-    }
-
-
-}
-
 
 
 static int ap3426_psensor_enable(struct i2c_client *client)
@@ -631,18 +591,18 @@ static void ap3426_suspend(struct early_suspend *h)
 {
 
     if (misc_ps_opened)
-	ap3426_psensor_disable(ap3426_data_g -> client);
+	ap3426_psensor_disable(ap3426_data_g->client);
     if (misc_ls_opened)
-	ap3426_lsensor_disable(ap3426_data_g -> client);
+	ap3426_lsensor_disable(ap3426_data_g->client);
 }
 
 static void ap3426_resume(struct early_suspend *h)
 {
 
     if (misc_ls_opened)
-	ap3426_lsensor_enable(ap3426_data_g -> client);
+	ap3426_lsensor_enable(ap3426_data_g->client);
     if (misc_ps_opened)
-	ap3426_psensor_enable(ap3426_data_g -> client);
+	ap3426_psensor_enable(ap3426_data_g->client);
 }
 #endif
 
@@ -731,6 +691,134 @@ static ssize_t ap3426_store_mode(struct device *dev,
 }
 
 
+static ssize_t ap3426_ls_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = ap3426_data_g;
+    unsigned long mode;
+    int ret;
+
+    LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+    mutex_lock(&ap3426_ls_lock);
+    if((mode == AP3426_SYS_ALS_ENABLE) && ap3426_get_mode(data->client) != AP3426_SYS_ALS_ENABLE) {
+	ap3426_set_althres(data->client, 1000);
+	ap3426_set_ahthres(data->client, 2000);
+	misc_ls_opened = 1;
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_ENABLE);
+	if (ret < 0)
+	    return ret;
+    } else {
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+    }
+    mutex_unlock(&ap3426_ls_lock);
+#if POLLING_MODE
+    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+
+    if(ret) 
+	LDBG("Timer Error\n");
+#endif
+    return count;
+}
+
+
+static ssize_t ap3426_ps_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = ap3426_data_g;
+    unsigned long mode;
+    int ret;
+
+    LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+
+    mutex_lock(&ap3426_ps_lock);
+    if((mode == AP3426_SYS_PS_ENABLE ) && ap3426_get_mode(data->client) != AP3426_SYS_PS_ENABLE) {
+	ret = ap3426_set_plthres(data->client, 100);
+	ret = ap3426_set_phthres(data->client, 500);
+	misc_ps_opened = 1;
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
+	if (ret < 0)
+	    return ret;
+
+    
+    } else {
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+    }
+    mutex_unlock(&ap3426_ps_lock);
+#if POLLING_MODE
+    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+
+    if(ret) 
+	LDBG("Timer Error\n");
+#endif
+    return count;
+}
+
+static ssize_t ap3426_hs_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = ap3426_data_g;
+    unsigned long mode;
+    int ret;
+
+    LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+
+    mutex_lock(&ap3426_heartbeat_lock);
+
+
+    if(mode == 9) {
+	data-> hsensor_enable = 1;
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_CONF,
+		AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_DC_1,
+		AP3426_REG_PS_DC_1_MASK, AP3426_REG_PS_DC_1_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_DC_2,
+		AP3426_REG_PS_DC_2_MASK, AP3426_REG_PS_DC_2_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_LEDD,
+		AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 1);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_MEAN,
+		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_PERSIS,
+		AP3426_REG_PS_PERSIS_MASK, AP3426_REG_PS_PERSIS_SHIFT, 0);
+	ret = ap3426_set_plthres(data->client, 0);
+	ret = ap3426_set_phthres(data->client, 535);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
+
+	if (ret < 0)
+	    return ret;
+    } else {
+	data-> hsensor_enable = 0;
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+    }
+    mutex_unlock(&ap3426_heartbeat_lock);
+#if POLLING_MODE
+    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+
+    if(ret) 
+	LDBG("Timer Error\n");
+#endif
+    return count;
+}
 
 /* lux */
 static ssize_t ap3426_show_lux(struct device *dev,
@@ -976,6 +1064,9 @@ static ssize_t ap3426_em_write(struct device *dev,
 static struct device_attribute attributes[] = {
     __ATTR(range, S_IWUSR | S_IRUGO, ap3426_show_range, ap3426_store_range),
     __ATTR(mode, 0666, ap3426_show_mode, ap3426_store_mode),
+    __ATTR(lsensor, 0666, ap3426_show_mode, ap3426_ls_enable),
+    __ATTR(psensor, 0666, ap3426_show_mode, ap3426_ps_enable),
+    __ATTR(hsensor, 0666, ap3426_show_mode, ap3426_hs_enable),
     __ATTR(lux, S_IRUGO, ap3426_show_lux, NULL),
     __ATTR(pxvalue, S_IRUGO, ap3426_show_pxvalue, NULL),
     __ATTR(object, S_IRUGO, ap3426_show_object, NULL),
@@ -1044,9 +1135,9 @@ static int ap3426_init_client(struct i2c_client *client)
 	data->reg_cache[i] = v;
     }
     /* set defaults */
-    
+
     ap3426_set_range(client, AP3426_ALS_RANGE_0);
-    ap3426_set_mode(client, AP3426_SYS_DEV_DOWN);
+    ap3426_set_mode(data->client, AP3426_SYS_DEV_DOWN);
 
     return 0;
 }
@@ -1074,7 +1165,7 @@ static void plsensor_work_handler(struct work_struct *w)
 	container_of(w, struct ap3426_data, plsensor_work);
     u8 int_stat;
     int pxvalue;
-    int Pval;
+    int obj;
     int ret;
     int value;
 
@@ -1087,33 +1178,34 @@ static void plsensor_work_handler(struct work_struct *w)
 	LDBG("LS INT Status: %0x\n", int_stat);
 
 	value = ap3426_get_adc_value(data->client);
-	input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
-	input_sync(data->lsensor_input_dev);
 	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
 		AP3426_REG_SYS_INT_AMASK, AP3426_REG_SYS_INT_LS_SHIFT, 0);
+	input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
+	input_sync(data->lsensor_input_dev);
     }
 
     // PX int
     if (int_stat & AP3426_REG_SYS_INT_PMASK)
     {
-	int_stat = ap3426_get_intstat(data->client);
 	LDBG("PS INT Status: %0x\n", int_stat);
-	Pval = ap3426_get_object(data->client);
-	LDBG("%s\n", Pval ? "obj near":"obj far");
-	input_report_abs(data->psensor_input_dev, ABS_DISTANCE, Pval);
-
-	input_sync(data->psensor_input_dev);
+	obj = ap3426_get_object(data->client);
 	pxvalue = ap3426_get_px_value(data->client); 
-	LDBG("pxvalue = %d\n", pxvalue);
-	input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
-	input_sync(data->hsensor_input_dev);
 
-	mdelay(5);
 	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
 		AP3426_REG_SYS_INT_PMASK, AP3426_REG_SYS_INT_PS_SHIFT, 0);
+	LDBG("%s\n", obj ? "obj near":"obj far");
+	input_report_abs(data->psensor_input_dev, ABS_DISTANCE, obj);
+	input_sync(data->psensor_input_dev);
+
+	if(data->hsensor_enable) {
+	    LDBG("pxvalue = %d\n", pxvalue);
+	    input_report_rel(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
+	    input_sync(data->hsensor_input_dev);
+	}
+
     }
 
-      enable_irq(data->client->irq);
+    enable_irq(data->client->irq);
 }
 /*
  * I2C layer
@@ -1253,7 +1345,7 @@ static int __devexit ap3426_remove(struct i2c_client *client)
     unregister_early_suspend(&ap3426_early_suspend);
 #endif
 
-    ap3426_set_mode(client, 0);
+    ap3426_set_mode(data->client, 0);
     kfree(i2c_get_clientdata(client));
 
     if (data->plsensor_wq)

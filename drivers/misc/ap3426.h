@@ -49,7 +49,7 @@
 #define AP3426_ERR_IDENTIFICATION			-6
 
 
-#define AP3426_NUM_CACHABLE_REGS	30
+#define AP3426_NUM_CACHABLE_REGS	31
 
 /* ap3426 control registers */
 /*============================================================================*/
@@ -94,6 +94,8 @@
 #define AP3426_REG_ALS_CONF        0x10 /*ALS GAIN*/
 
 #define AP3426_REG_ALS_PERSIS      0x14
+#define AP3426_REG_ALS_PERSIS_SHIFT      (0)
+#define AP3426_REG_ALS_PERSIS_MASK      0x3F
 //#define AP3426_REG_ALS_CAL         0x19
 
 #define AP3426_REG_ALS_THDL_L      0x1A
