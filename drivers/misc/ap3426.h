@@ -163,6 +163,7 @@
 #define	AP3426_SYS_PS_ENABLE       0x02
 #define	AP3426_SYS_ALS_PS_ENABLE   0x03
 #define	AP3426_SYS_DEV_RESET       0x04
+#define	AP3426_SYS_HS_ENABLE       0x09
 /*----------------------------------------------------------------------------*/
 //INT FLAG BIT MASK
 #define	AP3426_SYS_ALS_INT_TRI     0x01

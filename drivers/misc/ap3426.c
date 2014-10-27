@@ -187,38 +187,6 @@ static int ap3426_set_range(struct i2c_client *client, int range)
 }
 
 
-static int ap3426_set_ir_data(struct i2c_client *client, int en)
-{
-    int ret = 0;
-
-    if(en == 9) {
-	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
-	mdelay(200);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_CONF,
-		AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_1,
-		AP3426_REG_PS_DC_1_MASK, AP3426_REG_PS_DC_1_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_2,
-		AP3426_REG_PS_DC_2_MASK, AP3426_REG_PS_DC_2_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_LEDD,
-		AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 1);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_MEAN,
-		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
-	ret = __ap3426_write_reg(client, AP3426_REG_PS_PERSIS,
-		AP3426_REG_PS_PERSIS_MASK, AP3426_REG_PS_PERSIS_SHIFT, 0);
-	ret = ap3426_set_plthres(client, 0);
-	ret = ap3426_set_phthres(client, 535);
-	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
-    }else if(en == 0){
-	ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
-		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
-	mdelay(200);
-    }
-
-    return ret;
-}
 /* mode */
 static int ap3426_get_mode(struct i2c_client *client)
 {
@@ -637,28 +605,6 @@ static ssize_t ap3426_store_range(struct device *dev,
 
 
 
-static ssize_t ap3426_store_ir_data(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-    struct ap3426_data *data = ap3426_data_g;
-    unsigned long val;
-    int ret;
-
-    if (strict_strtoul(buf, 10, &val) < 0)
-	return -EINVAL;
-
-    ret = ap3426_set_ir_data(data->client, val);
-
-    if (ret < 0)
-	return ret;
-#if POLLING_MODE
-    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
-
-    if(ret) 
-	LDBG("Timer Error\n");
-#endif
-    return count;
-}
 /* mode */
 static ssize_t ap3426_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -739,10 +685,19 @@ static ssize_t ap3426_ls_enable(struct device *dev,
 	}
 	data -> old_mode = ap3426_get_mode(data->client);
     } else {
-	if(mode == AP3426_SYS_DEV_DOWN && misc_ps_opened == 1)
+	if(mode == AP3426_SYS_DEV_DOWN && misc_ps_opened == 1) {
 	    data -> old_mode = AP3426_SYS_PS_ENABLE;
-	else
+	    misc_ls_opened = 0;
+	} else if(mode == AP3426_SYS_ALS_ENABLE) {
+	    data -> old_mode = AP3426_SYS_ALS_ENABLE;
+	    misc_ls_opened = 1;
+
+	} else {
 	    data -> old_mode = AP3426_SYS_DEV_DOWN;
+	    misc_ps_opened = 0;
+	    misc_ls_opened = 0;
+	}
+
     }
     LDBG("1.data -> old_mode = %d\n", data -> old_mode);
     mutex_unlock(&ap3426_ls_lock);
@@ -811,10 +766,18 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 	}
 	data -> old_mode = ap3426_get_mode(data->client);
     } else {
-	if(mode == AP3426_SYS_DEV_DOWN && misc_ls_opened == 1)
+	if(mode == AP3426_SYS_DEV_DOWN && misc_ls_opened == 1) {
 	    data -> old_mode = AP3426_SYS_ALS_ENABLE;
-	else
+	    misc_ps_opened = 0;
+	} else if(mode == AP3426_SYS_PS_ENABLE) {
+	    data -> old_mode = AP3426_SYS_PS_ENABLE;
+	    misc_ls_opened = 1;
+
+	} else {
 	    data -> old_mode = AP3426_SYS_DEV_DOWN;
+	    misc_ps_opened = 0;
+	    misc_ls_opened = 0;
+	}
     }
     LDBG("2.data -> old_mode = %d\n", data -> old_mode);
     mutex_unlock(&ap3426_ps_lock);
@@ -842,7 +805,7 @@ static ssize_t ap3426_hs_enable(struct device *dev,
     mutex_lock(&ap3426_heartbeat_lock);
 
 
-    if(mode == 9) {
+    if(mode == AP3426_SYS_HS_ENABLE) {
 	data -> hsensor_enable = 1;
 
 	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_CONF,
@@ -1174,7 +1137,6 @@ static struct device_attribute attributes[] = {
     __ATTR(plthres, S_IWUSR | S_IRUGO, ap3426_show_plthres, ap3426_store_plthres),
     __ATTR(phthres, S_IWUSR | S_IRUGO, ap3426_show_phthres, ap3426_store_phthres),
     __ATTR(calibration, S_IWUSR | S_IRUGO, ap3426_show_calibration_state, ap3426_store_calibration_state),
-    __ATTR(ir_data, 0666, NULL, ap3426_store_ir_data),
 #ifdef LSC_DBG
     __ATTR(em, S_IWUSR | S_IRUGO, ap3426_em_read, ap3426_em_write),
 #endif
