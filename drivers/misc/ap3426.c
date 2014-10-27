@@ -697,16 +697,16 @@ static ssize_t ap3426_ls_enable(struct device *dev,
 {
     struct ap3426_data *data = ap3426_data_g;
     unsigned long mode;
-    int ret, origin_mode;
+    int ret;
 
     LDBG("mode = %s,%s\n", __func__,buf);
     if (strict_strtoul(buf, 10, &mode) < 0)
 	return -EINVAL;
     mutex_lock(&ap3426_ls_lock);
 
-    origin_mode = ap3426_get_mode(data->client);
     if(!(data -> hsensor_enable)){
-	if((mode == AP3426_SYS_ALS_ENABLE) && origin_mode == AP3426_SYS_PS_ENABLE) {
+	data -> old_mode = ap3426_get_mode(data->client);
+	if((mode == AP3426_SYS_ALS_ENABLE) && data -> old_mode == AP3426_SYS_PS_ENABLE) {
 	    ap3426_set_althres(data->client, 1000);
 	    ap3426_set_ahthres(data->client, 2000);
 	    misc_ls_opened = 1;
@@ -714,7 +714,7 @@ static ssize_t ap3426_ls_enable(struct device *dev,
 		    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_PS_ENABLE);
 	    if (ret < 0)
 		return ret;
-	} else if(mode == AP3426_SYS_ALS_ENABLE && origin_mode == AP3426_SYS_DEV_DOWN){
+	} else if(mode == AP3426_SYS_ALS_ENABLE && data -> old_mode == AP3426_SYS_DEV_DOWN){
 	    ap3426_set_althres(data->client, 1000);
 	    ap3426_set_ahthres(data->client, 2000);
 	    misc_ls_opened = 1;
@@ -723,7 +723,7 @@ static ssize_t ap3426_ls_enable(struct device *dev,
 	    if (ret < 0)
 		return ret;
 	} else if (mode == AP3426_SYS_DEV_DOWN){
-	    if(origin_mode != AP3426_SYS_ALS_PS_ENABLE && data-> hsensor_enable != 1) {
+	    if(data -> old_mode != AP3426_SYS_ALS_PS_ENABLE && data-> hsensor_enable != 1) {
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
@@ -733,10 +733,18 @@ static ssize_t ap3426_ls_enable(struct device *dev,
 	    } else {
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
+		misc_ls_opened = 0;
 
 	    }
-	}}
-
+	}
+	data -> old_mode = ap3426_get_mode(data->client);
+    } else {
+	if(mode == AP3426_SYS_DEV_DOWN && misc_ps_opened == 1)
+	    data -> old_mode = AP3426_SYS_PS_ENABLE;
+	else
+	    data -> old_mode = AP3426_SYS_DEV_DOWN;
+    }
+    LDBG("1.data -> old_mode = %d\n", data -> old_mode);
     mutex_unlock(&ap3426_ls_lock);
 #if POLLING_MODE
     LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
@@ -754,7 +762,8 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 {
     struct ap3426_data *data = ap3426_data_g;
     unsigned long mode;
-    int ret, origin_mode;
+    int ret;
+    
 
     LDBG("mode = %s,%s\n", __func__,buf);
     if (strict_strtoul(buf, 10, &mode) < 0)
@@ -764,10 +773,10 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 
 
 
-    origin_mode = ap3426_get_mode(data->client);
 
     if(!(data -> hsensor_enable)) {
-	if(mode == AP3426_SYS_PS_ENABLE && origin_mode == AP3426_SYS_ALS_ENABLE) {
+	data -> old_mode = ap3426_get_mode(data->client);
+	if(mode == AP3426_SYS_PS_ENABLE && data -> old_mode == AP3426_SYS_ALS_ENABLE) {
 	    ret = ap3426_set_plthres(data->client, 100);
 	    ret = ap3426_set_phthres(data->client, 500);
 	    misc_ps_opened = 1;
@@ -777,7 +786,7 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 		return ret;
 
 
-	} else if(mode == AP3426_SYS_PS_ENABLE && origin_mode == AP3426_SYS_DEV_DOWN){
+	} else if(mode == AP3426_SYS_PS_ENABLE && data -> old_mode == AP3426_SYS_DEV_DOWN){
 	    ret = ap3426_set_plthres(data->client, 100);
 	    ret = ap3426_set_phthres(data->client, 500);
 	    misc_ps_opened = 1;
@@ -785,8 +794,8 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 		    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
 	    if (ret < 0)
 		return ret;
-	} else if( mode == AP3426_SYS_DEV_DOWN){
-	    if(origin_mode != AP3426_SYS_ALS_PS_ENABLE && data-> hsensor_enable != 1) {
+	} else if(mode == AP3426_SYS_DEV_DOWN){
+	    if(data -> old_mode != AP3426_SYS_ALS_PS_ENABLE && data-> hsensor_enable != 1) {
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
@@ -796,11 +805,18 @@ static ssize_t ap3426_ps_enable(struct device *dev,
 	    } else {
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_ENABLE);
-		misc_ls_opened = 1;
+		misc_ps_opened = 0;
 
 	    }
 	}
+	data -> old_mode = ap3426_get_mode(data->client);
+    } else {
+	if(mode == AP3426_SYS_DEV_DOWN && misc_ls_opened == 1)
+	    data -> old_mode = AP3426_SYS_ALS_ENABLE;
+	else
+	    data -> old_mode = AP3426_SYS_DEV_DOWN;
     }
+    LDBG("2.data -> old_mode = %d\n", data -> old_mode);
     mutex_unlock(&ap3426_ps_lock);
 #if POLLING_MODE
     LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
@@ -828,7 +844,6 @@ static ssize_t ap3426_hs_enable(struct device *dev,
 
     if(mode == 9) {
 	data -> hsensor_enable = 1;
-	data -> old_mode = ap3426_get_mode(data->client);
 
 	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_CONF,
 		AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
@@ -849,24 +864,29 @@ static ssize_t ap3426_hs_enable(struct device *dev,
 
 	if (ret < 0)
 	    return ret;
-    } else if(mode == AP3426_SYS_DEV_DOWN){
+    } else {
 	data -> hsensor_enable = 0;
 	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	LDBG("3.data -> old_mode = %d\n", data -> old_mode);
 	switch(data -> old_mode) {
 	    case AP3426_SYS_PS_ENABLE:
 		ret = ap3426_set_plthres(data->client, 100);
 		ret = ap3426_set_phthres(data->client, 500);
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
+		data -> old_mode = AP3426_SYS_PS_ENABLE;
 		misc_ps_opened = 1;
+		misc_ls_opened = 0;
 		break;
 	    case AP3426_SYS_ALS_ENABLE:
 		ap3426_set_althres(data->client, 1000);
 		ap3426_set_ahthres(data->client, 2000);
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_ENABLE);
+		data -> old_mode = AP3426_SYS_ALS_ENABLE;
 		misc_ls_opened = 1;
+		misc_ps_opened = 0;
 		break;
 	    case AP3426_SYS_ALS_PS_ENABLE:
 		ret = ap3426_set_plthres(data->client, 100);
@@ -875,12 +895,14 @@ static ssize_t ap3426_hs_enable(struct device *dev,
 		ap3426_set_ahthres(data->client, 2000);
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_PS_ENABLE);
+		data -> old_mode = AP3426_SYS_ALS_PS_ENABLE;
 		misc_ps_opened = 1;
 		misc_ls_opened = 1;
 		break;
 	    default:
 		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
 			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+		data -> old_mode = AP3426_SYS_DEV_DOWN;
 		misc_ps_opened = 0;
 		misc_ls_opened = 0;
 
