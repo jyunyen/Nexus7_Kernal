@@ -49,7 +49,7 @@
 #define CX5036_ERR_IDENTIFICATION			-6
 
 
-#define CX5036_NUM_CACHABLE_REGS	56
+#define CX5036_NUM_CACHABLE_REGS	58
 #define CX5036_ALS_GAIN_1   0x0
 #define CX5036_ALS_GAIN_4   0x1
 #define CX5036_ALS_GAIN_16  0x2
@@ -72,8 +72,10 @@
 /* cx5036 interrupt flag */
 /*============================================================================*/
 #define CX5036_REG_SYS_INTSTATUS   0x01
-#define CX5036_REG_SYS_INT_POR_MASK	0x40
-#define CX5036_REG_SYS_INT_MGS_MASK	0x30
+#define CX5036_REG_SYS_INT_POR_MASK	0x80
+#define CX5036_REG_SYS_INT_POR_SHIFT	(7)
+#define CX5036_REG_SYS_INT_MGS_MASK	0x40
+#define CX5036_REG_SYS_INT_MGS_SHIFT	(6)
 #define CX5036_REG_SYS_INT_ERRF_MASK	0x20//read only
 #define CX5036_REG_SYS_INT_OBJ_MASK	0x10//read only
 #define CX5036_REG_SYS_INT_OBJ_SHIFT	(4)
@@ -98,6 +100,7 @@
 /* cx5036 waiting time Register */
 #define CX5036_REG_WAITING_TIME     0x06
 #define CX5036_REG_WAITING_TIME_WTIME_MASK 0x40     
+#define CX5036_REG_WAITING_TIME_WTIME_SHIFT (0)
 #define CX5036_REG_WAITING_TIME_WUNIT_MASK 0x7F
 
 /* cx5036 ALS control Register */
@@ -143,30 +146,39 @@
 /* cx5036 MGS control Register */
 #define CX5036_REG_MGS_CON    0x11
 #define CX5036_REG_MGS_GAIN_MASK    0xC0
+#define CX5036_REG_MGS_GAIN_SHIFT    (0)
 
 
 /* cx5036 MGS persistence Register */
 #define CX5036_REG_MGS_PERS    0x12
 #define CX5036_REG_MGS_PERS_MASK    0x3F
+#define CX5036_REG_MGS_PERS_SHIFT   (0)
 
 
 /* cx5036 MGS subsystem control Register */
 #define CX5036_REG_MGS_SUBSYS_CON    0x13
 #define CX5036_REG_MGS_SUBSYS_CON_AUTOPW_MASK      0x40
+#define CX5036_REG_MGS_SUBSYS_CON_AUTOPW_SHIFT     (6)
 #define CX5036_REG_MGS_SUBSYS_CON_AUTOCALB_MASK    0x04
+#define CX5036_REG_MGS_SUBSYS_CON_AUTOCALB_SHIFT   (2)
 #define CX5036_REG_MGS_SUBSYS_CON_MGSXYIMD_MASK    0x02
+#define CX5036_REG_MGS_SUBSYS_CON_MGSXYIMD_SHIFT   (1)
 #define CX5036_REG_MGS_SUBSYS_CON_MGSZIMD_MASK     0x01
+#define CX5036_REG_MGS_SUBSYS_CON_MGSZIMD_SHIFT    (0)
 
 
 /* cx5036 MGS XY Hold Register */
 #define CX5036_REG_MGS_XY_HOLD    0x14
 #define CX5036_REG_MGS_XY_HOLD_MASK      0xFF
+#define CX5036_REG_MGS_XY_HOLD_SHIFT      (0)
 
 
 /* cx5036 LED control Register */
 #define CX5036_REG_LED_CON    0x15
 #define CX5036_REG_MGSLDR_LED_CON_MASK      0xC0
+#define CX5036_REG_MGSLDR_LED_CON_SHIFT     (6)
 #define CX5036_REG_MGSLPUW_LED_CON_MASK      0x3F
+#define CX5036_REG_MGSLPUW_LED_CON_SHIFT    (0)
 
 
 /* cx5036 MGS Interrupt Status Register */
@@ -304,10 +316,12 @@
 /* cx5036 PS Calibrate L Register */
 #define CX5036_REG_PS_CAL_L    0x3A
 #define CX5036_REG_PS_CAL_L_MASK    0xFF
+#define CX5036_REG_PS_CAL_L_SHIFT    (0)
 
 /* cx5036 PS Calibrate H Register */
 #define CX5036_REG_PS_CAL_H    0x3B
 #define CX5036_REG_PS_CAL_H_MASK    0xFF
+#define CX5036_REG_PS_CAL_H_SHIFT    (0)
 
 /* cx5036 LuminanceCoef R Register */
 #define CX5036_REG_LUM_COEFR    0x3C
@@ -327,38 +341,47 @@
 /* cx5036 MGS Z Calibration Register */
 #define CX5036_REG_MGS_CAL_Z    0x3F
 #define CX5036_REG_MGS_CAL_Z_MASK    0xFF
+#define CX5036_REG_MGS_CAL_Z_SHIFT   (0)
 
 /* cx5036 MGS Y Calibration Register */
 #define CX5036_REG_MGS_CAL_Y    0x4E
 #define CX5036_REG_MGS_CAL_Y_MASK    0xFF
+#define CX5036_REG_MGS_CAL_Y_SHIFT    (0)
 
 /* cx5036 MGS X Calibration Register */
 #define CX5036_REG_MGS_CAL_X    0x4F
 #define CX5036_REG_MGS_CAL_X_MASK    0xFF
+#define CX5036_REG_MGS_CAL_X_SHIFT    (0)
 
 /* cx5036 MGS X Low Threshold Register */
 #define CX5036_REG_MGS_X_LTH    0x48
 #define CX5036_REG_MGS_X_LTH_MASK    0xFF
+#define CX5036_REG_MGS_X_LTH_SHIFT   (0)
 
 /* cx5036 MGS X HIGH Threshold Register */
-#define CX5036_REG_MGS_X_HTH_HIGH    0x49
+#define CX5036_REG_MGS_X_HTH    0x49
 #define CX5036_REG_MGS_X_HTH_MASK    0xFF
+#define CX5036_REG_MGS_X_HTH_SHIFT    (0)
 
 /* cx5036 MGS Y Low Threshold Register */
 #define CX5036_REG_MGS_Y_LTH    0x4A
 #define CX5036_REG_MGS_Y_LTH_MASK    0xFF
+#define CX5036_REG_MGS_Y_LTH_SHIFT    (0)
 
 /* cx5036 MGS Y HIGH Threshold Register */
-#define CX5036_REG_MGS_Y_HTH_HIGH    0x4B
+#define CX5036_REG_MGS_Y_HTH    0x4B
 #define CX5036_REG_MGS_Y_HTH_MASK    0xFF
+#define CX5036_REG_MGS_Y_HTH_SHIFT    (0)
 
 /* cx5036 MGS Z Low Threshold Register */
 #define CX5036_REG_MGS_Z_LTH    0x4C
 #define CX5036_REG_MGS_Z_LTH_MASK    0xFF
+#define CX5036_REG_MGS_Z_LTH_SHIFT    (0)
 
 /* cx5036 MGS Y HIGH Threshold Register */
-#define CX5036_REG_MGS_Z_HTH_HIGH    0x4D
+#define CX5036_REG_MGS_Z_HTH    0x4D
 #define CX5036_REG_MGS_Z_HTH_MASK    0xFF
+#define CX5036_REG_MGS_Z_HTH_SHIFT    (0)
 
 
 #endif

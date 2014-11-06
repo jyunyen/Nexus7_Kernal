@@ -56,9 +56,9 @@
 #define DRIVER_VERSION		"1"
 
 
-#define PL_TIMER_DELAY 2000
+#define PL_TIMER_DELAY 10
 #define POLLING_MODE 1
-
+#define INTERRUPT_MODE 0
 #define LSC_DBG
 #ifdef LSC_DBG
 #define LDBG(s,args...)	{printk("CX5036: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
@@ -74,6 +74,7 @@ static int cx5036_set_plthres(struct i2c_client *client, int val);
 static int cx5036_set_ahthres(struct i2c_client *client, int val);
 static int cx5036_set_althres(struct i2c_client *client, int val);
 static void cx5036_change_ls_threshold(struct i2c_client *client);
+static int cx5036_init_mgs(struct i2c_client *client);
 
 struct cx5036_data {
     struct i2c_client *client;
@@ -83,6 +84,7 @@ struct cx5036_data {
     struct input_dev	*psensor_input_dev;
     struct input_dev	*lsensor_input_dev;
     struct input_dev	*hsensor_input_dev;
+    struct input_dev	*msensor_input_dev;
     struct workqueue_struct *plsensor_wq;
     struct work_struct plsensor_work;
 #if POLLING_MODE
@@ -94,7 +96,7 @@ static struct cx5036_data *cx5036_data_g = NULL;
 // CX5036 register
 static u8 cx5036_reg[CX5036_NUM_CACHABLE_REGS] = 
 {
-    0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x0a, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f
+    0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x0a, 0x0c, 0x0d, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x71
 };
 
 // CX5036 range
@@ -110,6 +112,16 @@ static int reg_num = 0;
 static int cali = 100;
 static int misc_ps_opened = 0;
 static int misc_ls_opened = 0;
+//Motion Valuables
+static int motion = 0;
+#define MOTION_NONE    0
+#define MOTION_UP      1
+#define MOTION_DOWN    2
+#define MOTION_LEFT    3
+#define MOTION_RIGHT   4
+static int motion_interrupt = 0;
+static DEFINE_MUTEX(cx5026_motion_intrrupt_lock);
+
 
 #define ADD_TO_IDX(addr,idx)	{														\
     int i;												\
@@ -226,6 +238,12 @@ static int cx5036_set_mode(struct i2c_client *client, int mode)
 	ret = cx5036_set_ahthres(client, 55704);
 	misc_ps_opened = 1;
 	misc_ls_opened = 1;
+    } else if(mode == CX5036_SYS_MGS_ENABLE) { 
+	LDBG("mode = %x\n", mode);
+	ret = __cx5036_write_reg(client, CX5036_REG_SYS_CON,
+		CX5036_REG_SYS_CON_MASK, CX5036_REG_SYS_CON_SHIFT, CX5036_SYS_RST_ENABLE);
+	ret = cx5036_init_mgs(client);
+
     } else if(mode == CX5036_SYS_DEV_DOWN) {
 	LDBG("mode = %x\n", mode);
 	misc_ps_opened = 0;
@@ -443,7 +461,54 @@ static int cx5036_get_px_value(struct i2c_client *client)
 }
 
 
+static int cx5036_init_mgs(struct i2c_client *client)
+{
+    int ret = 0;
+    //---------------------------------------
+    // mgs configuration
+    //---------------------------------------
+    ret = __cx5036_write_reg(client, CX5036_REG_WAITING_TIME, 
+	    CX5036_REG_WAITING_TIME_WTIME_MASK, CX5036_REG_WAITING_TIME_WTIME_SHIFT, 0);//Register 0x06 configure wait_time
+    ret = __cx5036_write_reg(client, CX5036_REG_MGS_CON,
+	    CX5036_REG_MGS_GAIN_MASK, CX5036_REG_MGS_GAIN_SHIFT, 1);//Register 0x11 mgs gain      = x8   
+    ret = __cx5036_write_reg(client, CX5036_REG_MGS_PERS, 
+	    CX5036_REG_MGS_PERS_MASK, CX5036_REG_MGS_PERS_SHIFT, 0);//Register 0x12 configure mgs Z axis persist= every time
+    ret = __cx5036_write_reg(client, CX5036_REG_LED_CON, 
+	    CX5036_REG_MGSLDR_LED_CON_MASK, CX5036_REG_MGSLDR_LED_CON_SHIFT, 1);//Register 0x17 configure mgs LED width = 31T
+    ret = __cx5036_write_reg(client, CX5036_REG_LED_CON, 
+	    CX5036_REG_MGSLPUW_LED_CON_MASK, CX5036_REG_MGSLPUW_LED_CON_SHIFT, 55);//Register 0x17 configure mgs LED width = 31T
+    ret = __cx5036_write_reg(client, 0x16, 0xff, 0, 0x40);//Register 0x17 configure mgs LED width = 31T
+    ret = __cx5036_write_reg(client, 0x71, 0xff, 0, 0x01);//Register 0x71 configure mgs error	 = enable flag
 
+    if(ret < 0)
+	LDBG("Init MGS Failed\n");
+
+    return ret;
+}
+static int cx5036_get_mgs_x_value(struct i2c_client *client)
+{
+    return (u32)i2c_smbus_read_byte_data(client, CX5036_REG_MGS_DATA_X);
+}
+
+static int cx5036_get_mgs_y_value(struct i2c_client *client)
+{
+    return (u32)i2c_smbus_read_byte_data(client, CX5036_REG_MGS_DATA_Y);
+
+}
+
+static int cx5036_get_mgs_z_value(struct i2c_client *client)
+{
+    return (u32)i2c_smbus_read_byte_data(client, CX5036_REG_MGS_DATA_Z);
+}
+
+static int cx5036_get_mgs_d_value(struct i2c_client *client)
+{
+    return (u32)i2c_smbus_read_byte_data(client, 0x23);
+}
+static int cx5036_get_mgs_err_flag(struct i2c_client *client)
+{
+    return (u32)i2c_smbus_read_byte_data(client, CX5036_REG_ERR);
+}
 
 static int cx5036_lsensor_enable(struct i2c_client *client)
 {
@@ -537,6 +602,42 @@ done:
 static void cx5036_unregister_heartbeat_device(struct i2c_client *client, struct cx5036_data *data)
 {
     input_unregister_device(data->hsensor_input_dev);
+}
+
+static int cx5036_register_motion_sensor_device(struct i2c_client *client, struct cx5036_data *data)
+{
+    struct input_dev *input_dev;
+    int rc;
+
+    LDBG("allocating input device motion sensor\n");
+    input_dev = input_allocate_device();
+    if (!input_dev) {
+	dev_err(&client->dev,"%s: could not allocate input device for motion sensor\n", __FUNCTION__);
+	rc = -ENOMEM;
+	goto done;
+    }
+    data->msensor_input_dev = input_dev;
+    input_set_drvdata(input_dev, data);
+    input_dev->name = "motion";
+    input_dev->dev.parent = &client->dev;
+    set_bit(EV_KEY, input_dev->evbit);
+    input_set_capability(input_dev, EV_KEY, KEY_UP);
+    input_set_capability(input_dev, EV_KEY, KEY_DOWN);
+    input_set_capability(input_dev, EV_KEY, KEY_RIGHT);
+    input_set_capability(input_dev, EV_KEY, KEY_LEFT);
+
+    rc = input_register_device(input_dev);
+    if (rc < 0) {
+	pr_err("%s: could not register input device for motion sensor\n", __FUNCTION__);
+	goto done;
+    }
+done:
+    return rc;
+}
+
+static void cx5036_unregister_motion_device(struct i2c_client *client, struct cx5036_data *data)
+{
+    input_unregister_device(data->msensor_input_dev);
 }
 static void cx5036_change_ls_threshold(struct i2c_client *client)
 {
@@ -674,7 +775,100 @@ static ssize_t cx5036_store_range(struct device *dev,
 
 
 
+/* motion */
+static ssize_t cx5036_show_motion(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", motion);
+}
 
+static ssize_t cx5036_store_motion(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    unsigned long val;
+
+    if ((strict_strtoul(buf, 10, &val) < 0))
+	return -EINVAL;
+    motion = val;
+    switch(val) {
+	case MOTION_UP:
+	    input_report_key(data -> msensor_input_dev, KEY_UP, 1);
+	    input_report_key(data -> msensor_input_dev, KEY_UP, 0);
+	    break;
+	case MOTION_DOWN:
+	    input_report_key(data -> msensor_input_dev, KEY_DOWN, 1);
+	    input_report_key(data -> msensor_input_dev, KEY_DOWN, 0);
+	    break;
+	case MOTION_RIGHT:
+	    input_report_key(data -> msensor_input_dev, KEY_RIGHT, 1);
+	    input_report_key(data -> msensor_input_dev, KEY_RIGHT, 0);
+	    break;
+	case MOTION_LEFT:
+	    input_report_key(data -> msensor_input_dev, KEY_LEFT, 1);
+	    input_report_key(data -> msensor_input_dev, KEY_LEFT, 0);
+	    break;
+	case MOTION_NONE:
+	    //input_report_key(data -> msensor_input_dev, KEY_UP, 0);
+	    //input_report_key(data -> msensor_input_dev, KEY_DOWN, 0);
+	    //input_report_key(data -> msensor_input_dev, KEY_LEFT, 0);
+	    //input_report_key(data -> msensor_input_dev, KEY_RIGHT, 0);
+	    break;
+    }
+    input_sync(data -> msensor_input_dev);
+    return count;
+}
+/*MGS X*/
+static ssize_t cx5036_show_mgs_x(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    return sprintf(buf, "%d\n", cx5036_get_mgs_x_value(data->client));
+}
+
+/*MGS Y*/
+static ssize_t cx5036_show_mgs_y(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    return sprintf(buf, "%d\n", cx5036_get_mgs_y_value(data->client));
+}
+
+/*MGS Z*/
+static ssize_t cx5036_show_mgs_z(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    return sprintf(buf, "%d\n", cx5036_get_mgs_z_value(data->client));
+}
+
+/*MGS Z*/
+static ssize_t cx5036_show_mgs_d(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    return sprintf(buf, "%d\n", cx5036_get_mgs_d_value(data->client));
+}
+
+/*MGS Error Flag*/
+static ssize_t cx5036_show_err_flag(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct cx5036_data *data = cx5036_data_g;
+    return sprintf(buf, "%d\n", cx5036_get_mgs_err_flag(data->client));
+}
+
+/*MGS INT*/
+static ssize_t cx5036_show_motion_int(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    int val = 0; 
+    mutex_lock(&cx5026_motion_intrrupt_lock);
+    val = motion_interrupt;
+    motion_interrupt = 0;
+    mutex_unlock(&cx5026_motion_intrrupt_lock);
+    return sprintf(buf, "%d\n", val);
+}
 /* mode */
 static ssize_t cx5036_show_mode(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -960,6 +1154,13 @@ static struct device_attribute attributes[] = {
     __ATTR(plthres, S_IWUSR | S_IRUGO, cx5036_show_plthres, cx5036_store_plthres),
     __ATTR(phthres, S_IWUSR | S_IRUGO, cx5036_show_phthres, cx5036_store_phthres),
     __ATTR(calibration, S_IWUSR | S_IRUGO, cx5036_show_calibration_state, cx5036_store_calibration_state),
+    __ATTR(motion, 0666, cx5036_show_motion, cx5036_store_motion),
+    __ATTR(motion_int, 0666, cx5036_show_motion_int, NULL),
+    __ATTR(mgs_x, 0666, cx5036_show_mgs_x, NULL),
+    __ATTR(mgs_y, 0666, cx5036_show_mgs_y, NULL),
+    __ATTR(mgs_z, 0666, cx5036_show_mgs_z, NULL),
+    __ATTR(mgs_d, 0666, cx5036_show_mgs_d, NULL),
+    __ATTR(err_flag, 0666, cx5036_show_err_flag, NULL),
 #ifdef LSC_DBG
     __ATTR(em, S_IWUSR | S_IRUGO, cx5036_em_read, cx5036_em_write),
 #endif
@@ -1044,18 +1245,31 @@ static void cx5036_work_handler(struct work_struct *w)
 	input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
 	input_sync(data->hsensor_input_dev);
 
-	mdelay(5);
 	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
 		CX5036_REG_SYS_INT_PS_MASK, CX5036_REG_SYS_INT_PS_SHIFT, 0);
+    }
+
+    //Motion Int
+    if (int_stat & CX5036_REG_SYS_INT_MGS_MASK)
+    {
+	int_stat = cx5036_get_intstat(data->client);
+	mutex_lock(&cx5026_motion_intrrupt_lock);
+	motion_interrupt = 1;
+	mutex_unlock(&cx5026_motion_intrrupt_lock);
+//	LDBG("1.MGS INT Status: %0x\n", int_stat);
+
+	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
+		CX5036_REG_SYS_INT_POR_MASK, CX5036_REG_SYS_INT_POR_SHIFT, 0);
+	ret = __cx5036_write_reg(data->client, CX5036_REG_SYS_INTSTATUS,
+		CX5036_REG_SYS_INT_MGS_MASK, CX5036_REG_SYS_INT_MGS_SHIFT, 0);
+	int_stat = cx5036_get_intstat(data->client);
     }
 #if !defined(POLLING_MODE)
     enable_irq(data->client->irq);
 #endif
 }
-/*
- * I2C layer
- */
 
+#ifdef INTERRUPT_MODE
 static irqreturn_t cx5036_irq(int irq, void *data_)
 {
     struct cx5036_data *data = data_;
@@ -1066,6 +1280,7 @@ static irqreturn_t cx5036_irq(int irq, void *data_)
 
     return IRQ_HANDLED;
 }
+#endif
 static int create_sysfs_interfaces(struct cx5036_data *sensor)
 {
     int i;
@@ -1150,14 +1365,20 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 
     err = cx5036_register_heartbeat_sensor_device(client, data);
     if (err) {
-	dev_err(&client->dev, "failed to register_heartbeatsensor_device\n");
-	goto exit_free_heartbeats_device;
+	dev_err(&client->dev, "failed to register_heartbeat_sensor_device\n");
+	goto exit_free_ps_device;
+    }
+
+    err = cx5036_register_motion_sensor_device(client, data);
+    if (err) {
+	dev_err(&client->dev, "failed to register_motion_sensor_device\n");
+	goto exit_free_heartbeat_device;
     }
     /* register sysfs hooks */
 
     err = create_sysfs_interfaces(data);
     if (err)
-	goto exit_free_ps_device;
+	goto exit_free_motion_device;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
     cx5036_early_suspend.suspend = cx5036_suspend;
@@ -1166,7 +1387,7 @@ static int __devinit cx5036_probe(struct i2c_client *client,
     register_early_suspend(&cx5036_early_suspend);
 #endif
 
-
+#ifdef INTERRUPT_MODE
     err = request_threaded_irq(client->irq, NULL, cx5036_irq,
 	    IRQF_TRIGGER_FALLING,
 	    "cx5036", data);
@@ -1174,7 +1395,7 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 	dev_err(&client->dev, "ret: %d, could not get IRQ %d\n",err,client->irq);
 	goto exit_free_ps_device;
     }
-
+#endif
     data->plsensor_wq = create_singlethread_workqueue("plsensor_wq");
     if (!data->plsensor_wq) {
 	LDBG("%s: create workqueue failed\n", __func__);
@@ -1200,11 +1421,13 @@ err_create_wq_failed:
 #endif
     if (data->plsensor_wq)
 	destroy_workqueue(data->plsensor_wq);
+exit_free_motion_device:
+    cx5036_unregister_motion_device(client,data);
+exit_free_heartbeat_device:
+    cx5036_unregister_heartbeat_device(client,data);
 exit_free_ps_device:
     cx5036_unregister_psensor_device(client,data);
 
-exit_free_heartbeats_device:
-    cx5036_unregister_heartbeat_device(client,data);
 exit_free_ls_device:
     cx5036_unregister_lsensor_device(client,data);
 
@@ -1223,6 +1446,7 @@ static int __devexit cx5036_remove(struct i2c_client *client)
     cx5036_unregister_psensor_device(client,data);
     cx5036_unregister_lsensor_device(client,data);
     cx5036_unregister_heartbeat_device(client,data);
+    cx5036_unregister_motion_device(client,data);
 #ifdef CONFIG_HAS_EARLYSUSPEND
     unregister_early_suspend(&cx5036_early_suspend);
 #endif

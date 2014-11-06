@@ -285,7 +285,7 @@ static const struct i2c_board_info cardhu_i2c2_board_info_ap3xx6[] = {
 
 #if defined(CONFIG_SENSORS_CX5036)
 
-#define CX5036_INT_PIN         TEGRA_GPIO_PZ2
+#define CX5036_INT_PIN         TEGRA_GPIO_PX1//TEGRA_GPIO_PZ2
 #define CX5036_NAME		"cx5036"
 
 
@@ -296,7 +296,7 @@ static const struct i2c_board_info cardhu_i2c2_board_info_cx5036[] = {
 	.type                   = CX5036_NAME,
 	.addr                   = 0x1C,
 	.flags                  = 0,
-	.irq                    = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PZ2),
+	.irq                    = TEGRA_GPIO_TO_IRQ(CX5036_INT_PIN),
     },
 };
 static int cx5036_init(void)
@@ -609,7 +609,7 @@ int __init grouper_sensors_init(void)
 	i2c_register_board_info(4, grouper_i2c4_nct1008_board_info,
 		ARRAY_SIZE(grouper_i2c4_nct1008_board_info));
 
-	mpuirq_init();
+	//mpuirq_init();
 #if defined(CONFIG_SENSORS_AP321XX) 
 	ap321xx_init();
 #endif
