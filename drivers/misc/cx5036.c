@@ -50,13 +50,15 @@
 #endif
 #include <linux/workqueue.h>
 #include <linux/timer.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
 #include "cx5036.h"
 
 #define CX5036_DRV_NAME		"cx5036"
 #define DRIVER_VERSION		"1"
 
 
-#define PL_TIMER_DELAY 10
+#define PL_TIMER_DELAY 5L
 #define POLLING_MODE 1
 #define INTERRUPT_MODE 0
 #define LSC_DBG
@@ -121,6 +123,10 @@ static int motion = 0;
 #define MOTION_RIGHT   4
 static int motion_interrupt = 0;
 static DEFINE_MUTEX(cx5026_motion_intrrupt_lock);
+
+
+#define MS_TO_NS(x)	(x * 1E6L)
+static struct hrtimer hr_timer;
 
 
 #define ADD_TO_IDX(addr,idx)	{														\
@@ -474,7 +480,7 @@ static int cx5036_init_mgs(struct i2c_client *client)
     ret = __cx5036_write_reg(client, CX5036_REG_MGS_PERS, 
 	    CX5036_REG_MGS_PERS_MASK, CX5036_REG_MGS_PERS_SHIFT, 0);//Register 0x12 configure mgs Z axis persist= every time
     ret = __cx5036_write_reg(client, CX5036_REG_LED_CON, 
-	    CX5036_REG_MGSLDR_LED_CON_MASK, CX5036_REG_MGSLDR_LED_CON_SHIFT, 1);//Register 0x17 configure mgs LED width = 31T
+	    CX5036_REG_MGSLDR_LED_CON_MASK, CX5036_REG_MGSLDR_LED_CON_SHIFT, 3);//Register 0x17 configure mgs LED width = 31T
     ret = __cx5036_write_reg(client, CX5036_REG_LED_CON, 
 	    CX5036_REG_MGSLPUW_LED_CON_MASK, CX5036_REG_MGSLPUW_LED_CON_SHIFT, 55);//Register 0x17 configure mgs LED width = 31T
     ret = __cx5036_write_reg(client, 0x16, 0xff, 0, 0x40);//Register 0x17 configure mgs LED width = 31T
@@ -891,8 +897,8 @@ static ssize_t cx5036_store_mode(struct device *dev,
     if (ret < 0)
 	return ret;
 #if POLLING_MODE
-    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies);
-    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+    //LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies);
+    //ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
     if(!ret) 
 	LDBG("Timer Error\n");
@@ -1207,6 +1213,26 @@ static void cx5036_timer_callback(unsigned long pl_data)
 	LDBG("Timer Error\n");
 
 }
+
+enum hrtimer_restart cx5036_hrtimer_callback( struct hrtimer *timer )
+{
+    struct cx5036_data *data;
+    int ret =0;
+    ktime_t currtime , interval;
+    currtime  = ktime_get();
+
+    data = cx5036_data_g;
+    queue_work(data->plsensor_wq, &data->plsensor_work);
+
+	//LDBG("%s\n", __func__);
+	interval = ktime_set(0, MS_TO_NS(PL_TIMER_DELAY)); 
+	hrtimer_forward(timer, currtime , interval);
+
+    if(ret) 
+	LDBG("Timer Error\n");
+    return HRTIMER_RESTART;
+}
+
 #endif
 static void cx5036_work_handler(struct work_struct *w)
 {
@@ -1324,6 +1350,7 @@ static int __devinit cx5036_probe(struct i2c_client *client,
     struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
     struct cx5036_data *data;
     int err = 0;
+    ktime_t ktime;
 
     LDBG("cx5036_probe\n");
 
@@ -1407,10 +1434,22 @@ static int __devinit cx5036_probe(struct i2c_client *client,
 
 #if POLLING_MODE
     LDBG("Timer module installing\n");
-    setup_timer(&data->pl_timer, cx5036_timer_callback, 0);
+    //setup_timer(&data->pl_timer, cx5036_timer_callback, 0);
 #endif
 
 
+
+    LDBG("HR Timer module installing\n");
+
+    ktime = ktime_set( 0, MS_TO_NS(PL_TIMER_DELAY) );
+
+    hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
+
+    hr_timer.function = &cx5036_hrtimer_callback;
+
+    LDBG( "Starting timer to fire in %ldms (%ld)\n", PL_TIMER_DELAY, jiffies );
+
+    hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
     cx5036_data_g = data;
     dev_info(&client->dev, "Driver version %s enabled\n", DRIVER_VERSION);
     return 0;
