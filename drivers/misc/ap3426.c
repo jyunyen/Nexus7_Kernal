@@ -328,7 +328,7 @@ static int ap3426_get_adc_value(struct i2c_client *client)
 {
     unsigned int lsb, msb, val;
 #ifdef LSC_DBG
-    unsigned int tmp,range;
+    unsigned int tmp,range_idx;
 #endif
 
     lsb = i2c_smbus_read_byte_data(client, AP3426_REG_ALS_DATA_LOW);
@@ -342,10 +342,10 @@ static int ap3426_get_adc_value(struct i2c_client *client)
     if (msb < 0)
 	return msb;
 
-    range = ap3426_get_range(client);
+    //range_idx = ap3426_get_range(client);
 
-    tmp = (((msb << 8) | lsb) * range) >> 16;
-    tmp = tmp * cali / 100;
+    //tmp = (((msb << 8) | lsb) * range[range_idx]) >> 16;
+    //tmp = tmp * cali / 100;
     val = msb << 8 | lsb;
     return val;
 }
