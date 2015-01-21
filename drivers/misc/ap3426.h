@@ -132,7 +132,12 @@
 #define AP3426_REG_PS_MEAN_MASK         0x03
 
 #define AP3426_REG_PS_SMARTINT     0x24 /* PS Smart INT for low power */
+
+
 #define AP3426_REG_PS_INTEGR       0x25
+#define AP3426_REG_PS_INTEGR_SHIFT         (0)
+#define AP3426_REG_PS_INTEGR_MASK         0x3F
+
 #define AP3426_REG_PS_PERSIS       0x26
 #define AP3426_REG_PS_PERSIS_SHIFT       (0)
 #define AP3426_REG_PS_PERSIS_MASK       0x3F

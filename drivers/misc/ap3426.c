@@ -62,7 +62,7 @@
 
 
 #define PL_TIMER_DELAY 2000
-#define POLLING_MODE 0
+#define POLLING_MODE 1
 
 #define LSC_DBG
 #ifdef LSC_DBG
@@ -140,9 +140,10 @@ static int __ap3426_read_reg(struct i2c_client *client,
 {
     struct ap3426_data *data = i2c_get_clientdata(client);
     u8 idx = 0xff;
+    int val = 0;
 
-    ADD_TO_IDX(reg,idx)
-	return (data->reg_cache[idx] & mask) >> shift;
+    val = i2c_smbus_read_byte_data(client, reg);
+	return (val & mask) >> shift;
 }
 
 static int __ap3426_write_reg(struct i2c_client *client,
@@ -324,6 +325,25 @@ static int ap3426_set_phthres(struct i2c_client *client, int val)
     return err;
 }
 
+static int ap3426_get_ir_value(struct i2c_client *client)
+{
+    unsigned int lsb, msb, val;
+
+
+    lsb = __ap3426_read_reg(client, AP3426_REG_IR_DATA_LOW,
+	    AP3426_REG_IR_DATA_LOW_MASK, AP3426_REG_IR_DATA_LOW_SHIFT);
+    LDBG("%s, IR = %d\n", __func__, (u32)(lsb));
+    msb = __ap3426_read_reg(client, AP3426_REG_IR_DATA_HIGH,
+	    AP3426_REG_IR_DATA_HIGH_MASK, AP3426_REG_IR_DATA_HIGH_SHIFT);
+    LDBG("%s, IR = %d\n", __func__, (u32)(msb));
+
+
+//    lsb = i2c_smbus_read_byte_data(client, AP3426_REG_IR_DATA_LOW);
+  //  msb = i2c_smbus_read_byte_data(client, AP3426_REG_IR_DATA_HIGH);
+    val = (msb << 8) | lsb;
+    return val;
+}
+
 static int ap3426_get_adc_value(struct i2c_client *client)
 {
     unsigned int lsb, msb, val;
@@ -334,19 +354,19 @@ static int ap3426_get_adc_value(struct i2c_client *client)
     lsb = i2c_smbus_read_byte_data(client, AP3426_REG_ALS_DATA_LOW);
 
     if (lsb < 0) {
-	return lsb;
+	return -1;
     }
 
     msb = i2c_smbus_read_byte_data(client, AP3426_REG_ALS_DATA_HIGH);
 
     if (msb < 0)
-	return msb;
+	return -1;
 
     //range_idx = ap3426_get_range(client);
 
     //tmp = (((msb << 8) | lsb) * range[range_idx]) >> 16;
     //tmp = tmp * cali / 100;
-    val = msb << 8 | lsb;
+    val = (msb << 8) | lsb;
     return val;
 }
 
@@ -648,6 +668,41 @@ static ssize_t ap3426_ls_enable(struct device *dev,
     LDBG("mode = %s,%s\n", __func__,buf);
     if (strict_strtoul(buf, 10, &mode) < 0)
 	return -EINVAL;
+
+    if(mode == AP3426_SYS_ALS_ENABLE){
+	ap3426_set_althres(data->client, 1000);
+	ap3426_set_ahthres(data->client, 2000);
+
+	ret = ap3426_set_range(data->client, AP3426_ALS_RANGE_2);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_LEDD,
+		AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_MEAN,
+		AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_PS_INTEGR,
+		AP3426_REG_PS_INTEGR_MASK, AP3426_REG_PS_INTEGR_SHIFT, 0);
+
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_PS_ENABLE);
+	misc_ls_opened = 1;
+	misc_ps_opened = 1;
+	if (ret < 0)
+	    return ret;
+    } else if (mode == AP3426_SYS_DEV_DOWN){
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+	misc_ls_opened = 0;
+	misc_ps_opened = 0;
+    }
+#if POLLING_MODE
+    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
+
+    if(ret) 
+	LDBG("Timer Error\n");
+#endif
+	/*
     mutex_lock(&ap3426_ls_lock);
 
     if(!(data -> hsensor_enable)){
@@ -701,13 +756,7 @@ static ssize_t ap3426_ls_enable(struct device *dev,
     }
     LDBG("1.data -> old_mode = %d\n", data -> old_mode);
     mutex_unlock(&ap3426_ls_lock);
-#if POLLING_MODE
-    LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
-    ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
-
-    if(ret) 
-	LDBG("Timer Error\n");
-#endif
+*/
     return count;
 }
 
@@ -896,6 +945,18 @@ static ssize_t ap3426_show_lux(struct device *dev,
 }
 
 
+/* ir data */
+static ssize_t ap3426_show_irdata(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct ap3426_data *data = ap3426_data_g;
+
+    /* No LUX data if power down */
+    if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
+	return sprintf((char*) buf, "%s\n", "Please power up first!");
+
+    return sprintf(buf, "%d\n", ap3426_get_ir_value(data->client));
+}
 
 /* Px data */
 static ssize_t ap3426_show_pxvalue(struct device *dev,
@@ -1129,7 +1190,8 @@ static struct device_attribute attributes[] = {
     __ATTR(lsensor, 0666, ap3426_show_mode, ap3426_ls_enable),
     __ATTR(psensor, 0666, ap3426_show_mode, ap3426_ps_enable),
     __ATTR(hsensor, 0666, ap3426_show_mode, ap3426_hs_enable),
-    __ATTR(lux, S_IRUGO, ap3426_show_lux, NULL),
+    __ATTR(lux, 0666, ap3426_show_lux, NULL),
+    __ATTR(irdata, 0666, ap3426_show_irdata, NULL),
     __ATTR(pxvalue, S_IRUGO, ap3426_show_pxvalue, NULL),
     __ATTR(object, S_IRUGO, ap3426_show_object, NULL),
     __ATTR(althres, S_IWUSR | S_IRUGO, ap3426_show_althres, ap3426_store_althres),
@@ -1236,7 +1298,7 @@ static void plsensor_work_handler(struct work_struct *w)
     // ALS int
     if (int_stat & AP3426_REG_SYS_INT_AMASK)
     {
-	LDBG("LS INT Status: %0x\n", int_stat);
+	//LDBG("LS INT Status: %0x\n", int_stat);
 
 	value = ap3426_get_adc_value(data->client);
 	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
