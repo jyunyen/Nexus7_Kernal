@@ -150,10 +150,10 @@ static int __cx5036_read_reg(struct i2c_client *client,
 	u32 reg, u8 mask, u8 shift)
 {
     struct cx5036_data *data = i2c_get_clientdata(client);
-    u8 idx = 0xff;
+    int val = 0;
 
-    ADD_TO_IDX(reg,idx)
-	return (data->reg_cache[idx] & mask) >> shift;
+    val = i2c_smbus_read_byte_data(client, reg);
+	return (val & mask) >> shift;
 }
 
 static int __cx5036_write_reg(struct i2c_client *client,
